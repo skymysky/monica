@@ -8,13 +8,13 @@
   <div class="breadcrumb">
     <div class="{{ Auth::user()->getFluidLayout() }}">
       <div class="row">
-        <div class="col-xs-12">
+        <div class="col-12">
           <ul class="horizontal">
             <li>
-              <a href="/dashboard">{{ trans('app.breadcrumb_dashboard') }}</a>
+              <a href="{{ route('dashboard.index') }}">{{ trans('app.breadcrumb_dashboard') }}</a>
             </li>
             <li>
-              <a href="/settings">{{ trans('app.breadcrumb_settings') }}</a>
+              <a href="{{ route('settings.index') }}">{{ trans('app.breadcrumb_settings') }}</a>
             </li>
             <li>
               {{ trans('app.breadcrumb_settings_import') }}
@@ -30,12 +30,12 @@
 
       @include('settings._sidebar')
 
-      <div class="col-xs-12 col-sm-9 blank-screen">
+      <div class="col-12 col-sm-9 blank-screen">
 
         <div class="br3 ba b--gray-monica bg-white mb4">
           <div class="pa3 bb b--gray-monica">
 
-            <img src="/img/settings/imports/import.svg">
+            <img src="img/settings/imports/import.svg">
 
             <h2>{{ trans('settings.import_blank_title') }}</h2>
 
@@ -43,10 +43,10 @@
 
             <p>{{ trans('settings.import_blank_description') }}</p>
 
-            <p class="cta"><a href="/settings/import/upload" class="btn">{{ trans('settings.import_blank_cta') }}</a></p>
+            <p class="cta"><a href="{{ route('settings.upload') }}" class="btn">{{ trans('settings.import_blank_cta') }}</a></p>
 
-            @if (config('monica.requires_subscription') and auth()->user()->account->hasLimitations())
-              <p class="requires-subscription">Importing data requires a subscription.</p>
+            @if (config('monica.requires_subscription') && $accountHasLimitations)
+              <p class="requires-subscription">{{ trans('settings.import_need_subscription') }}</p>
             @endif
           </div>
         </div>

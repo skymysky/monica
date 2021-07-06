@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\User;
+use App\Models\User\User;
 use Illuminate\Console\Command;
 
 class Deactivate2FA extends Command
@@ -12,7 +12,9 @@ class Deactivate2FA extends Command
      *
      * @var string
      */
-    protected $signature = '2fa:deactivate {--email= : The email of the user to deactivate 2FA} {--force : run without asking for confirmation}';
+    protected $signature = '2fa:deactivate
+                            {--force : Force the operation to run when in production.}
+                            {--email= : The email of the user to deactivate 2FA.}';
 
     /**
      * The console command description.
@@ -20,16 +22,6 @@ class Deactivate2FA extends Command
      * @var string
      */
     protected $description = 'Deactivate 2FA for this user';
-
-    /**
-     * Create a new command instance.
-     *
-     * @return void
-     */
-    public function __construct()
-    {
-        parent::__construct();
-    }
 
     /**
      * Execute the console command.

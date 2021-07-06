@@ -2,165 +2,235 @@
 
 namespace App\Helpers;
 
-use Auth;
-use Carbon\Carbon;
-use Jenssegers\Date\Date;
+use function Safe\date;
+use function Safe\strtotime;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 
 class DateHelper
 {
     /**
-     * Creates a Carbon object.
+     * Creates a Carbon object from DateTime format.
+     * If timezone is given, it parse the date with this timezone.
+     * Always return a date with default timezone (UTC).
      *
-     * @param string date
-     * @param string timezone
-     * @return Carbon
+     * @param \DateTime|Carbon|string|null $date
+     * @param string $timezone
+     * @return Carbon|null
      */
-    public static function createDateFromFormat($date, $timezone)
+    public static function parseDateTime($date, $timezone = null): ?Carbon
     {
-        return Carbon::createFromFormat('Y-m-d H:i:s', $date, $timezone);
+        if (is_null($date)) {
+            return null;
+        }
+        if ($date instanceof Carbon) {
+            // ok
+        } elseif ($date instanceof \DateTimeInterface) {
+            $date = Carbon::instance($date);
+        } else {
+            try {
+                $date = Carbon::parse($date, $timezone);
+            } catch (\Exception $e) {
+                // Parse error
+                return null;
+            }
+        }
+
+        $appTimezone = config('app.timezone');
+        if ($date->timezone !== $appTimezone) {
+            $date->setTimezone($appTimezone);
+        }
+
+        return $date;
     }
 
     /**
-     * Return a date according to the timezone of the user, in a short format
-     * like "Oct 29, 1981".
+     * Creates a Carbon object from Date format.
+     * If timezone is given, it parse the date with this timezone.
+     * Always return a date with default timezone (UTC).
      *
-     * @param Carbon $date
-     * @return string
+     * @param Carbon|string $date
+     * @param string $timezone
+     * @return Carbon|null
      */
-    public static function getShortDate($date, $locale = null)
+    public static function parseDate($date, $timezone = null): ?Carbon
     {
-        $date = new Date($date);
-        $locale = self::getLocale($locale);
-
-        switch ($locale) {
-            case 'en':
-                $format = 'M d, Y';
-                break;
-            case 'pt':
-            case 'fr':
-                $format = 'd M Y';
-                break;
-            default:
-                $format = 'M d, Y';
-                break;
+        if (! $date instanceof Carbon) {
+            try {
+                $date = Carbon::parse($date);
+            } catch (\Exception $e) {
+                // Parse error
+                return null;
+            }
         }
 
-        return $date->format($format);
+        $date = Carbon::create($date->year, $date->month, $date->day, 0, 0, 0, $timezone ?? $date->timezone);
+
+        $appTimezone = config('app.timezone');
+        if ($date->timezone !== $appTimezone) {
+            $date->setTimezone($appTimezone);
+        }
+
+        return $date === false ? null : $date;
+    }
+
+    /**
+     * Return timestamp date format.
+     *
+     * @param Carbon|\App\Models\Instance\SpecialDate|string|null $date
+     * @return string|null
+     */
+    public static function getTimestamp($date): ?string
+    {
+        if (is_null($date)) {
+            return null;
+        }
+        if ($date instanceof \App\Models\Instance\SpecialDate) {
+            $date = $date->date;
+        }
+        if (! $date instanceof Carbon) {
+            $date = Carbon::parse($date);
+        }
+
+        return $date->translatedFormat(config('api.timestamp_format'));
+    }
+
+    /**
+     * Return date timestamp format.
+     *
+     * @param Carbon|\App\Models\Instance\SpecialDate|string|null $date
+     * @return string|null
+     */
+    public static function getDate($date): ?string
+    {
+        if (is_null($date)) {
+            return null;
+        }
+        if ($date instanceof \App\Models\Instance\SpecialDate) {
+            $date = $date->date;
+        }
+        if (! $date instanceof Carbon) {
+            $date = Carbon::parse($date);
+        }
+
+        return $date->translatedFormat(config('api.date_timestamp_format'));
+    }
+
+    /**
+     * Get timezone of the current user, or null.
+     *
+     * @return string|null
+     */
+    public static function getTimezone(): ?string
+    {
+        return Auth::check() ? Auth::user()->timezone : null;
+    }
+
+    /**
+     * Return a date in a short format like "Oct 29, 1981".
+     *
+     * @param string $date
+     * @return string
+     */
+    public static function getShortDate($date): string
+    {
+        return self::formatDate($date, 'format.short_date_year');
+    }
+
+    /**
+     * Return a date in a full format like "October 29, 1981".
+     *
+     * @param string $date
+     * @return string
+     */
+    public static function getFullDate($date): string
+    {
+        return self::formatDate($date, 'format.full_date_year');
     }
 
     /**
      * Return the month of the date according to the timezone of the user
-     * like "Oct", or "Dec.
+     * like "Oct", or "Dec".
      *
-     * @param Carbon $date
+     * @param string $date
      * @return string
      */
-    public static function getShortMonth($date, $locale = null)
+    public static function getShortMonth($date): string
     {
-        $date = new Date($date);
-        $locale = self::getLocale($locale);
-        $format = 'M';
+        return self::formatDate($date, 'format.short_month');
+    }
 
-        return $date->format($format);
+    /**
+     * Return the month and year of the date according to the timezone of the user
+     * like "October 2010", or "March 2032".
+     *
+     * @param string $date
+     * @return string
+     */
+    public static function getFullMonthAndDate($date): string
+    {
+        return self::formatDate($date, 'format.full_month_year');
     }
 
     /**
      * Return the day of the date according to the timezone of the user
-     * like "Mon", or "Wed.
+     * like "Mon", or "Wed".
      *
-     * @param Carbon $date
+     * @param \Carbon\Carbon $date
      * @return string
      */
-    public static function getShortDay($date, $locale = null)
+    public static function getShortDay($date): string
     {
-        $date = new Date($date);
-        $locale = self::getLocale($locale);
-        $format = 'D';
-
-        return $date->format($format);
+        return self::formatDate($date, 'format.short_day');
     }
 
     /**
      * Return a date according to the timezone of the user, in a short format
      * like "Oct 29".
      *
-     * @param Carbon $date
+     * @param \Carbon\Carbon $date
      * @return string
      */
-    public static function getShortDateWithoutYear($date, $locale = null)
+    public static function getShortDateWithoutYear($date): string
     {
-        $date = new Date($date);
-        $locale = self::getLocale($locale);
-
-        switch ($locale) {
-            case 'en':
-                $format = 'M d';
-                break;
-            case 'pt':
-            case 'fr':
-                $format = 'd M';
-                break;
-            default:
-                $format = 'M d';
-                break;
-        }
-
-        return $date->format($format);
+        return self::formatDate($date, 'format.short_date');
     }
 
     /**
      * Return a date and the time according to the timezone of the user, in a short format
      * like "Oct 29, 1981 19:32".
      *
-     * @param Carbon $date
+     * @param \Carbon\Carbon $date
      * @return string
      */
-    public static function getShortDateWithTime($date, $locale = null)
+    public static function getShortDateWithTime($date): string
     {
-        $date = new Date($date);
-        $locale = self::getLocale($locale);
-
-        switch ($locale) {
-            case 'en':
-                $format = 'M d, Y H:i';
-                break;
-            case 'pt':
-            case 'fr':
-                $format = 'd M Y H:i';
-                break;
-            default:
-                $format = 'M d, Y H:i';
-        }
-
-        return $date->format($format);
+        return self::formatDate($date, 'format.short_date_year_time');
     }
 
     /**
-     * Returns the locale of the instance, if defined. English by default.
+     * Return a date in a given format.
      *
-     * @param string
+     * @param string $date
      * @return string
      */
-    public static function getLocale($locale = null)
+    private static function formatDate($date, $format): string
     {
-        if (Auth::check()) {
-            $locale = $locale ?: Auth::user()->locale;
-        } else {
-            $locale = $locale ?: 'en';
-        }
+        $date = Carbon::parse($date);
+        $format = trans($format, [], Carbon::getLocale());
 
-        Date::setLocale($locale);
-
-        return $locale;
+        return $date->translatedFormat($format) ?: '';
     }
 
     /**
      * Add a given number of week/month/year to a date.
-     * @param Carbon $date      the start date
+     * @param \Carbon\Carbon $date      the start date
      * @param string $frequency week/month/year
      * @param int $number    the number of week/month/year to increment to
+     * @return \Carbon\Carbon
      */
-    public static function addTimeAccordingToFrequencyType(Carbon $date, $frequency, $number)
+    public static function addTimeAccordingToFrequencyType(\Carbon\Carbon $date, string $frequency, int $number): \Carbon\Carbon
     {
         switch ($frequency) {
             case 'week':
@@ -183,12 +253,12 @@ class DateHelper
      * @param  int    $month
      * @return string
      */
-    public static function getMonthAndYear(int $month)
+    public static function getMonthAndYear(int $month): string
     {
-        $month = Carbon::now()->addMonthsNoOverflow($month)->format('M');
-        $year = Carbon::now()->addMonthsNoOverflow($month)->format('Y');
+        $date = Carbon::now(static::getTimezone())->addMonthsNoOverflow($month);
+        $format = trans('format.short_month_year', [], Carbon::getLocale());
 
-        return $month.' '.$year;
+        return $date->translatedFormat($format) ?: '';
     }
 
     /**
@@ -196,35 +266,57 @@ class DateHelper
      * This is used on the Upgrade page to tell the user when the next billing
      * date would be if he subscribed.
      *
-     * @param  string
+     * @param  string $interval
      * @return Carbon
      */
-    public static function getNextTheoriticalBillingDate(String $interval)
+    public static function getNextTheoriticalBillingDate(string $interval): Carbon
     {
         if ($interval == 'monthly') {
-            return Carbon::now()->addMonth();
+            return now()->addMonth();
         }
 
-        return Carbon::now()->addYear();
+        return now()->addYear();
+    }
+
+    /**
+     * Gets a list of all the year from min to max (0 is the current year).
+     *
+     * @param int $max
+     * @param int $min
+     * @return Collection
+     */
+    public static function getListOfYears($max = 120, $min = 0): Collection
+    {
+        $years = collect([]);
+        $maxYear = now(static::getTimezone())->subYears($min)->year;
+        $minYear = now(static::getTimezone())->subYears($max)->year;
+
+        for ($year = $maxYear; $year >= $minYear; $year--) {
+            $years->push([
+                'id' => $year,
+                'name' => $year,
+            ]);
+        }
+
+        return $years;
     }
 
     /**
      * Gets a list of all the months in a year.
      *
-     * @return array
+     * @return Collection
      */
-    public static function getListOfMonths()
+    public static function getListOfMonths(): Collection
     {
-        Carbon::setLocale(auth()->user()->locale);
         $months = collect([]);
-        $currentDate = Carbon::now();
-        $currentDate->day = 1;
+        $currentDate = Carbon::parse('2000-01-01');
+        $format = trans('format.full_month', [], Carbon::getLocale());
 
-        for ($month = 1; $month < 13; $month++) {
+        for ($month = 1; $month <= 12; $month++) {
             $currentDate->month = $month;
             $months->push([
                 'id' => $month,
-                'name' => $currentDate->formatLocalized('%B'),
+                'name' => mb_convert_case($currentDate->translatedFormat($format), MB_CASE_TITLE, 'UTF-8'),
             ]);
         }
 
@@ -234,12 +326,12 @@ class DateHelper
     /**
      * Gets a list of all the days in a month.
      *
-     * @return array
+     * @return Collection
      */
-    public static function getListOfDays()
+    public static function getListOfDays(): Collection
     {
         $days = collect([]);
-        for ($day = 1; $day < 32; $day++) {
+        for ($day = 1; $day <= 31; $day++) {
             $days->push(['id' => $day, 'name' => $day]);
         }
 
@@ -249,32 +341,22 @@ class DateHelper
     /**
      * Gets a list of all the hours in a day.
      *
-     * @return array
+     * @return Collection
      */
-    public static function getListOfHours()
+    public static function getListOfHours(): Collection
     {
+        $currentDate = Carbon::parse('2000-01-01 00:00:00');
+        $format = trans('format.full_hour', [], Carbon::getLocale());
+
         $hours = collect([]);
         for ($hour = 1; $hour <= 24; $hour++) {
+            $currentDate->hour = $hour;
             $hours->push([
                 'id' => date('H:i', strtotime("$hour:00")),
-                'name' => date('h.iA', strtotime("$hour:00")),
+                'name' => $currentDate->translatedFormat($format),
             ]);
         }
 
         return $hours;
-    }
-
-    /**
-     * Removes a given number of days of a date given in parameter.
-     *
-     * @param  Carbon  $date
-     * @param  int    $numberOfDaysBefore
-     * @return Carbon
-     */
-    public static function getDateMinusGivenNumberOfDays(Carbon $date, int $numberOfDaysBefore)
-    {
-        $olderDate = $date->subDays($numberOfDaysBefore);
-
-        return $olderDate;
     }
 }

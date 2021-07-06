@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Tag;
-use Validator;
-use App\Contact;
+use App\Models\Contact\Tag;
 use Illuminate\Http\Request;
+use App\Models\Contact\Contact;
+use App\Services\Contact\Tag\DetachTag;
+use Illuminate\Support\Facades\Validator;
+use App\Services\Contact\Tag\AssociateTag;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use App\Http\Resources\Contact\Contact as ContactResource;
 
@@ -18,26 +20,22 @@ class ApiContactTagController extends ApiController
      */
     public function setTags(Request $request, $contactId)
     {
-        try {
-            $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $contactId)
-                ->firstOrFail();
-        } catch (ModelNotFoundException $e) {
-            return $this->respondNotFound();
+        $contact = $this->validateTag($request, $contactId);
+        if (! $contact instanceof Contact) {
+            return $contact;
         }
 
-        $validator = Validator::make($request->all(), [
-            'tags' => 'required|array',
-        ]);
+        $tags = collect($request->input('tags'))
+            ->filter(function ($tag) {
+                return ! empty($tag);
+            });
 
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
-        }
-
-        $tags = $request->get('tags');
         foreach ($tags as $tag) {
-            $contact->setTag($tag);
+            app(AssociateTag::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'contact_id' => $contact->id,
+                'name' => $tag,
+            ]);
         }
 
         return new ContactResource($contact);
@@ -45,6 +43,7 @@ class ApiContactTagController extends ApiController
 
     /**
      * Remove all the tags associated with the contact.
+     *
      * @param Request $request
      * @param int  $contactId
      */
@@ -58,22 +57,60 @@ class ApiContactTagController extends ApiController
             return $this->respondNotFound();
         }
 
-        $contact->unsetTags();
+        $contactTags = $contact->tags()->get();
+
+        foreach ($contactTags as $tag) {
+            app(DetachTag::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'contact_id' => $contact->id,
+                'tag_id' => $tag->id,
+            ]);
+        }
 
         return new ContactResource($contact);
     }
 
     /**
      * Remove one or more specific tags associated with the contact.
+     *
      * @param Request $request
      * @param int  $contactId
      */
     public function unsetTag(Request $request, $contactId)
     {
+        $contact = $this->validateTag($request, $contactId);
+        if (! $contact instanceof Contact) {
+            return $contact;
+        }
+
+        $tags = collect($request->input('tags'))
+            ->filter(function ($tag) {
+                return ! empty($tag);
+            });
+
+        foreach ($tags as $tag) {
+            app(DetachTag::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'contact_id' => $contact->id,
+                'tag_id' => $tag,
+            ]);
+        }
+
+        return new ContactResource($contact);
+    }
+
+    /**
+     * Validate the request for update tag.
+     *
+     * @param  Request $request
+     * @param  int $contactId
+     * @return mixed
+     */
+    private function validateTag(Request $request, $contactId)
+    {
         try {
             $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $contactId)
-                ->firstOrFail();
+                ->findOrFail($contactId);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
         }
@@ -83,24 +120,9 @@ class ApiContactTagController extends ApiController
         ]);
 
         if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
+            return $this->respondValidatorFailed($validator);
         }
 
-        $tags = $request->get('tags');
-        foreach ($tags as $tag) {
-            // does the tag exist?
-            try {
-                $tag = Tag::where('account_id', auth()->user()->account_id)
-                    ->where('id', $tag)
-                    ->firstOrFail();
-            } catch (ModelNotFoundException $e) {
-                return $this->respondNotFound();
-            }
-
-            $contact->unsetTag($tag);
-        }
-
-        return new ContactResource($contact);
+        return $contact;
     }
 }

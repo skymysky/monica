@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers\Api\Settings;
 
-use Validator;
-use App\ContactFieldType;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
+use App\Models\Contact\ContactFieldType;
+use Illuminate\Support\Facades\Validator;
 use App\Http\Controllers\Api\ApiController;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use App\Http\Resources\Settings\ContactFieldType\ContactFieldType as ContactFieldTypeResource;
@@ -15,7 +15,7 @@ class ApiContactFieldTypeController extends ApiController
     /**
      * Get the list of contact field types.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
      */
     public function index(Request $request)
     {
@@ -27,8 +27,10 @@ class ApiContactFieldTypeController extends ApiController
 
     /**
      * Get the detail of a given contact field type.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return ContactFieldTypeResource|\Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $contactFieldTypeId)
     {
@@ -45,29 +47,22 @@ class ApiContactFieldTypeController extends ApiController
 
     /**
      * Store the contactfieldtype.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return ContactFieldTypeResource|\Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        // Validates basic fields to create the entry
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|max:255',
-            'fontawesome_icon' => 'nullable|max:255',
-            'protocol' => 'nullable|max:255',
-            'delible' => 'integer',
-            'type' => 'nullable|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
+        $isvalid = $this->validateUpdate($request);
+        if ($isvalid !== true) {
+            return $isvalid;
         }
 
         try {
             $contactFieldType = ContactFieldType::create(
-                $request->all()
-                + ['account_id' => auth()->user()->account->id]
+                $request->except(['account_id'])
+                + ['account_id' => auth()->user()->account_id]
             );
         } catch (QueryException $e) {
             return $this->respondNotTheRightParameters();
@@ -78,9 +73,11 @@ class ApiContactFieldTypeController extends ApiController
 
     /**
      * Update the contact field type.
-     * @param  Request $request
-     * @param  int
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     * @param int $contactFieldTypeId
+     *
+     * @return ContactFieldTypeResource|\Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $contactFieldTypeId)
     {
@@ -92,18 +89,9 @@ class ApiContactFieldTypeController extends ApiController
             return $this->respondNotFound();
         }
 
-        // Validates basic fields to create the entry
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|max:255',
-            'fontawesome_icon' => 'nullable|max:255',
-            'protocol' => 'nullable|max:255',
-            'delible' => 'integer',
-            'type' => 'nullable|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
+        $isvalid = $this->validateUpdate($request);
+        if ($isvalid !== true) {
+            return $isvalid;
         }
 
         // Update the contactfieldtype itself
@@ -125,9 +113,35 @@ class ApiContactFieldTypeController extends ApiController
     }
 
     /**
-     * Delete an contactfieldtype.
+     * Validate the request for update.
+     *
      * @param  Request $request
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\JsonResponse|true
+     */
+    private function validateUpdate(Request $request)
+    {
+        // Validates basic fields to create the entry
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|max:255',
+            'fontawesome_icon' => 'nullable|max:255',
+            'protocol' => 'nullable|max:255',
+            'delible' => 'integer',
+            'type' => 'nullable|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->respondValidatorFailed($validator);
+        }
+
+        return true;
+    }
+
+    /**
+     * Delete an contactfieldtype.
+     *
+     * @param Request $request
+     *
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy(Request $request, $contactFieldTypeId)
     {

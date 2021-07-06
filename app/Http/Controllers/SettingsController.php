@@ -2,88 +2,124 @@
 
 namespace App\Http\Controllers;
 
-use DB;
-use Auth;
-use App\Tag;
-use App\User;
-use App\ImportJob;
-use App\Invitation;
+use App\Models\User\User;
+use App\Helpers\DateHelper;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
-use App\Jobs\SendNewUserAlert;
+use App\Helpers\LocaleHelper;
+use App\Helpers\AccountHelper;
+use Illuminate\Support\Carbon;
+use App\Helpers\TimezoneHelper;
+use App\Models\Contact\Contact;
 use App\Jobs\ExportAccountAsSQL;
 use App\Jobs\AddContactFromVCard;
-use App\Jobs\SendInvitationEmail;
+use App\Models\Account\ImportJob;
+use App\Models\Account\Invitation;
+use App\Services\User\EmailChange;
+use App\Exceptions\StripeException;
 use App\Http\Requests\ImportsRequest;
+use App\Notifications\InvitationMail;
 use App\Http\Requests\SettingsRequest;
-use Illuminate\Support\Facades\Storage;
+use LaravelWebauthn\Models\WebauthnKey;
 use App\Http\Requests\InvitationRequest;
-use PragmaRX\Google2FALaravel\Support\Authenticator;
+use App\Services\Contact\Tag\DestroyTag;
+use App\Services\Account\Settings\ResetAccount;
+use App\Services\Account\Settings\DestroyAccount;
+use PragmaRX\Google2FALaravel\Facade as Google2FA;
+use App\Http\Resources\Contact\ContactShort as ContactResource;
+use App\Http\Resources\Settings\WebauthnKey\WebauthnKey as WebauthnKeyResource;
 
 class SettingsController extends Controller
 {
-    protected $ignoredTables = [
-        'accounts',
-        'activity_type_groups',
-        'activity_types',
-        'api_usage',
-        'cache',
-        'countries',
-        'currencies',
-        'default_contact_field_types',
-        'failed_jobs',
-        'instances',
-        'jobs',
-        'migrations',
-        'oauth_access_tokens',
-        'oauth_auth_codes',
-        'oauth_clients',
-        'oauth_personal_access_clients',
-        'oauth_refresh_tokens',
-        'password_resets',
-        'pet_categories',
-        'sessions',
-        'statistics',
-        'subscriptions',
-        'users',
-    ];
+    /**
+     * Instantiate a new controller instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->middleware('limitations')->only(['inviteUser', 'storeImport']);
+    }
 
     /**
      * Display a listing of the resource.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View
      */
     public function index()
     {
+        $meContact = null;
+
+        $search = auth()->user()->first_name.' '.
+            auth()->user()->last_name.' '.
+            auth()->user()->email;
+        $existingContacts = Contact::search($search, auth()->user()->account_id, 'id')
+            ->real()
+            ->whereNotIn('id', [auth()->user()->me_contact_id])
+            ->paginate(20);
+
+        if (auth()->user()->me_contact_id) {
+            $meContact = Contact::where('account_id', auth()->user()->account_id)
+                ->find(auth()->user()->me_contact_id);
+            $existingContacts->prepend($meContact);
+        }
+
+        $accountHasLimitations = AccountHelper::hasLimitations(auth()->user()->account);
+
         return view('settings.index')
-                ->withHours(\App\Helpers\DateHelper::getListOfHours());
+                ->withAccountHasLimitations($accountHasLimitations)
+                ->withMeContact($meContact ? new ContactResource($meContact) : null)
+                ->withExistingContacts(ContactResource::collection($existingContacts))
+                ->withNamesOrder(User::NAMES_ORDER)
+                ->withLocales(LocaleHelper::getLocaleList()->sortByCollator('name-orig'))
+                ->withHours(DateHelper::getListOfHours())
+                ->withSelectedTimezone(TimezoneHelper::adjustEquivalentTimezone(DateHelper::getTimezone()))
+                ->withTimezones(collect(TimezoneHelper::getListOfTimezones())->map(function ($timezone) {
+                    return ['id' => $timezone['timezone'], 'name'=>$timezone['name']];
+                }));
     }
 
     /**
      * Save user settings.
      *
      * @param SettingsRequest $request
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function save(SettingsRequest $request)
     {
-        $request->user()->update(
+        $user = $request->user();
+
+        $user->update(
             $request->only([
                 'first_name',
                 'last_name',
-                'email',
                 'timezone',
                 'locale',
                 'currency_id',
                 'name_order',
-            ]) + [
-                'fluid_container' => $request->get('layout'),
-            ]
+                'fluid_container',
+                'temperature_scale',
+            ])
         );
 
-        $request->user()->account->default_time_reminder_is_sent = $request->get('reminder_time');
-        $request->user()->account->save();
+        if ($user->email !== $request->input('email')) {
+            app(EmailChange::class)->execute([
+                'account_id' => $user->account_id,
+                'email' => $request->input('email'),
+                'user_id' => $user->id,
+            ]);
+        }
 
-        return redirect('settings')
+        if (! AccountHelper::hasLimitations($user->account) && $request->input('me_contact_id')) {
+            $user->me_contact_id = $request->input('me_contact_id');
+            $user->save();
+        }
+
+        $user->account->default_time_reminder_is_sent = $request->input('reminder_time');
+        $user->account->save();
+
+        return redirect()->route('settings.index')
             ->with('status', trans('settings.settings_success', [], $request['locale']));
     }
 
@@ -91,115 +127,103 @@ class SettingsController extends Controller
      * Delete user account.
      *
      * @param Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function delete(Request $request)
     {
-        $user = $request->user();
-        $account = $user->account;
-
-        $tables = DB::select('SELECT table_name FROM information_schema.tables WHERE table_schema="monica"');
-
-        // Looping over the tables
-        foreach ($tables as $table) {
-            $tableName = $table->table_name;
-
-            if (in_array($tableName, $this->ignoredTables)) {
-                continue;
-            }
-
-            DB::table($tableName)->where('account_id', $account->id)->delete();
-        }
-
-        DB::table('accounts')->where('id', $account->id)->delete();
-
         $account = auth()->user()->account;
 
-        if ($account->isSubscribed()) {
-            $account->subscription($account->getSubscribedPlanName())->cancelNow();
+        try {
+            app(DestroyAccount::class)->execute([
+                'account_id' => $account->id,
+            ]);
+        } catch (StripeException $e) {
+            return redirect()->route('settings.index')
+                ->withErrors($e->getMessage());
         }
 
-        auth()->logout();
-        $user->forceDelete();
+        auth('')->logout();
 
-        return redirect('/');
+        return redirect()->route('loginRedirect');
     }
 
     /**
      * Reset user account.
      *
      * @param Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function reset(Request $request)
     {
         $user = $request->user();
         $account = $user->account;
 
-        $tables = DB::select('SELECT table_name FROM information_schema.tables WHERE table_schema="monica"');
+        app(ResetAccount::class)->execute([
+            'account_id' => $account->id,
+        ]);
 
-        // Looping over the tables
-        foreach ($tables as $table) {
-            $tableName = $table->table_name;
-
-            if (in_array($tableName, $this->ignoredTables)) {
-                continue;
-            }
-
-            DB::table($tableName)->where('account_id', $account->id)->delete();
-        }
-
-        return redirect('/settings')
+        return redirect()->route('settings.index')
                     ->with('status', trans('settings.reset_success'));
     }
 
     /**
      * Display the export view.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory
      */
     public function export()
     {
-        return view('settings.export');
+        return view('settings.export')
+            ->withAccountHasLimitations(AccountHelper::hasLimitations(auth()->user()->account));
     }
 
     /**
      * Exports the data of the account in SQL format.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Response|\Symfony\Component\HttpFoundation\Response|null
      */
     public function exportToSql()
     {
-        $path = $this->dispatchNow(new ExportAccountAsSQL());
+        $path = ExportAccountAsSQL::dispatchSync();
+
+        $adapter = disk_adapter(ExportAccountAsSQL::STORAGE);
+
+        $exportdate = Carbon::now(DateHelper::getTimezone())->format('Y-m-d');
 
         return response()
-            ->download(Storage::disk('public')->getDriver()->getAdapter()->getPathPrefix().$path, 'monica.sql')
+            ->download($adapter->getPathPrefix().$path, "monica-export.$exportdate.sql")
             ->deleteFileAfterSend(true);
     }
 
     /**
      * Display the import view.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory
      */
     public function import()
     {
+        $accountHasLimitations = AccountHelper::hasLimitations(auth()->user()->account);
+
         if (auth()->user()->account->importjobs->count() == 0) {
-            return view('settings.imports.blank');
+            return view('settings.imports.blank')
+                ->withAccountHasLimitations($accountHasLimitations);
         }
 
-        return view('settings.imports.index');
+        return view('settings.imports.index')
+            ->withAccountHasLimitations($accountHasLimitations);
     }
 
     /**
      * Display the Import people's view.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory|\Illuminate\Http\RedirectResponse
      */
     public function upload()
     {
-        if (config('monica.requires_subscription') && ! auth()->user()->account->isSubscribed()) {
-            return redirect('/settings/subscriptions');
+        if (AccountHelper::hasLimitations(auth()->user()->account)) {
+            return redirect()->route('settings.subscriptions.index');
         }
 
         return view('settings.imports.upload');
@@ -207,7 +231,7 @@ class SettingsController extends Controller
 
     public function storeImport(ImportsRequest $request)
     {
-        $filename = $request->file('vcard')->store('imports', 'public');
+        $filename = $request->file('vcard')->store('imports', config('filesystems.default'));
 
         $importJob = auth()->user()->account->importjobs()->create([
             'user_id' => auth()->user()->id,
@@ -215,7 +239,7 @@ class SettingsController extends Controller
             'filename' => $filename,
         ]);
 
-        dispatch(new AddContactFromVCard($importJob));
+        AddContactFromVCard::dispatch($importJob, $request->input('behaviour'));
 
         return redirect()->route('settings.import');
     }
@@ -223,15 +247,12 @@ class SettingsController extends Controller
     /**
      * Display the import report view.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory
      */
     public function report($importJobId)
     {
-        $importJob = ImportJob::findOrFail($importJobId);
-
-        if ($importJob->account_id != auth()->user()->account->id) {
-            return redirect()->route('settings.index');
-        }
+        $importJob = ImportJob::where('account_id', auth()->user()->account_id)
+            ->findOrFail($importJobId);
 
         return view('settings.imports.report', compact('importJob'));
     }
@@ -239,28 +260,31 @@ class SettingsController extends Controller
     /**
      * Display the users view.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory
      */
     public function users()
     {
         $users = auth()->user()->account->users;
+        $accountHasLimitations = AccountHelper::hasLimitations(auth()->user()->account);
 
         if ($users->count() == 1 && auth()->user()->account->invitations()->count() == 0) {
-            return view('settings.users.blank');
+            return view('settings.users.blank')
+                ->withAccountHasLimitations($accountHasLimitations);
         }
 
-        return view('settings.users.index', compact('users'));
+        return view('settings.users.index', compact('users'))
+            ->withAccountHasLimitations($accountHasLimitations);
     }
 
     /**
      * Show the form for creating a new resource.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory|\Illuminate\Http\RedirectResponse
      */
     public function addUser()
     {
-        if (config('monica.requires_subscription') && ! auth()->user()->account->isSubscribed()) {
-            return redirect('/settings/subscriptions');
+        if (AccountHelper::hasLimitations(auth()->user()->account)) {
+            return redirect()->route('settings.subscriptions.index');
         }
 
         return view('settings.users.add');
@@ -270,12 +294,13 @@ class SettingsController extends Controller
      * Store a newly created resource in storage.
      *
      * @param InvitationRequest $request
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function inviteUser(InvitationRequest $request)
     {
         // Make sure the confirmation to invite has not been bypassed
-        if (! $request->get('confirmation')) {
+        if (! $request->input('confirmation')) {
             return redirect()->back()->withErrors(trans('settings.users_error_please_confirm'))->withInput();
         }
 
@@ -285,7 +310,7 @@ class SettingsController extends Controller
             return redirect()->back()->withErrors(trans('settings.users_error_email_already_taken'))->withInput();
         }
 
-        // Has this user been invited already?
+        // Has this user already been invited?
         $invitations = Invitation::where('email', $request->only(['email']))->count();
         if ($invitations > 0) {
             return redirect()->back()->withErrors(trans('settings.users_error_already_invited'))->withInput();
@@ -298,17 +323,17 @@ class SettingsController extends Controller
             + [
                 'invited_by_user_id' => auth()->user()->id,
                 'account_id' => auth()->user()->account_id,
-                'invitation_key' => str_random(100),
+                'invitation_key' => Str::random(100),
             ]
         );
 
-        dispatch(new SendInvitationEmail($invitation));
+        $invitation->notify((new InvitationMail())->locale(auth()->user()->locale));
 
         auth()->user()->account->update([
             'number_of_invitations_sent' => auth()->user()->account->number_of_invitations_sent + 1,
         ]);
 
-        return redirect('settings/users')
+        return redirect()->route('settings.users.index')
             ->with('status', trans('settings.settings_success'));
     }
 
@@ -316,91 +341,37 @@ class SettingsController extends Controller
      * Remove the specified resource from storage.
      *
      * @param Invitation $invitation
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function destroyInvitation(Invitation $invitation)
     {
         $invitation->delete();
 
-        return redirect('/settings/users')
+        return redirect()->route('settings.users.index')
             ->with('success', trans('settings.users_invitation_deleted_confirmation_message'));
-    }
-
-    /**
-     * Display the specified resource.
-     *
-     * @param string $key
-     * @return \Illuminate\Http\Response
-     */
-    public function acceptInvitation($key)
-    {
-        if (Auth::check()) {
-            return redirect('/');
-        }
-
-        $invitation = Invitation::where('invitation_key', $key)
-                                ->firstOrFail();
-
-        return view('settings.users.accept', compact('key'));
-    }
-
-    /**
-     * Store the specified resource.
-     *
-     * @param Request $request
-     * @param string $key
-     * @return \Illuminate\Http\Response
-     */
-    public function storeAcceptedInvitation(Request $request, $key)
-    {
-        $invitation = Invitation::where('invitation_key', $key)
-                                    ->firstOrFail();
-
-        // as a security measure, make sure that the new user provides the email
-        // of the person who has invited him/her.
-        if ($request->input('email_security') != $invitation->invitedBy->email) {
-            return redirect()->back()->withErrors(trans('settings.users_error_email_not_similar'))->withInput();
-        }
-
-        $user = User::createDefault($invitation->account_id,
-                    $request->input('first_name'),
-                    $request->input('last_name'),
-                    $request->input('email'),
-                    $request->input('password'));
-
-        $invitation->delete();
-
-        // send me an alert
-        dispatch(new SendNewUserAlert($user));
-
-        if (Auth::attempt(['email' => $user->email, 'password' => $request->input('password')])) {
-            return redirect('dashboard');
-        }
     }
 
     /**
      * Delete additional user account.
      *
-     * @param Request $request
-     * @return \Illuminate\Http\Response
+     * @param int $userID
+     *
+     * @return \Illuminate\Http\RedirectResponse
      */
-    public function deleteAdditionalUser(Request $request, $userID)
+    public function deleteAdditionalUser($userID)
     {
-        $user = User::find($userID);
-
-        if ($user->account_id != auth()->user()->account_id) {
-            return redirect('/');
-        }
+        $user = User::where('account_id', auth()->user()->account_id)
+            ->findOrFail($userID);
 
         // make sure you don't delete yourself from this screen
         if ($user->id == auth()->user()->id) {
-            return redirect('/');
+            return redirect()->route('loginRedirect');
         }
 
-        $user = User::find($userID);
         $user->delete();
 
-        return redirect('/settings/users')
+        return redirect()->route('settings.users.index')
                 ->with('success', trans('settings.users_list_delete_success'));
     }
 
@@ -409,32 +380,84 @@ class SettingsController extends Controller
      */
     public function tags()
     {
-        return view('settings.tags');
+        return view('settings.tags')
+            ->withAccountHasLimitations(AccountHelper::hasLimitations(auth()->user()->account));
     }
 
-    public function deleteTag(Request $request, $tagId)
+    /**
+     * Destroy the tag.
+     *
+     * @param int $tagId
+     *
+     * @return \Illuminate\Http\RedirectResponse
+     */
+    public function deleteTag($tagId)
     {
-        $tag = Tag::findOrFail($tagId);
+        app(DestroyTag::class)->execute([
+            'tag_id' => $tagId,
+            'account_id' => auth()->user()->account_id,
+        ]);
 
-        if ($tag->account_id != auth()->user()->account_id) {
-            return redirect('/');
-        }
-
-        $tag->contacts()->detach();
-
-        $tag->delete();
-
-        return redirect('/settings/tags')
+        return redirect()->route('settings.tags.index')
                 ->with('success', trans('settings.tags_list_delete_success'));
     }
 
     public function api()
     {
-        return view('settings.api.index');
+        return view('settings.api.index')
+            ->withAccountHasLimitations(AccountHelper::hasLimitations(auth()->user()->account));
     }
 
-    public function security(Request $request)
+    public function dav()
     {
-        return view('settings.security.index', ['is2FAActivated' => (new Authenticator($request))->isActivated()]);
+        $davroute = route('sabre.dav');
+        $email = auth()->user()->email;
+
+        return view('settings.dav.index')
+                ->withDavRoute($davroute)
+                ->withCardDavRoute("{$davroute}/addressbooks/{$email}/contacts")
+                ->withCalDavBirthdaysRoute("{$davroute}/calendars/{$email}/birthdays")
+                ->withCalDavTasksRoute("{$davroute}/calendars/{$email}/tasks")
+                ->withAccountHasLimitations(AccountHelper::hasLimitations(auth()->user()->account));
+    }
+
+    public function security()
+    {
+        $webauthnKeys = WebauthnKey::where('user_id', auth()->id())->get();
+
+        return view('settings.security.index')
+            ->with('is2FAActivated', Google2FA::isActivated())
+            ->withWebauthnKeys(WebauthnKeyResource::collection($webauthnKeys))
+            ->withAccountHasLimitations(AccountHelper::hasLimitations(auth()->user()->account));
+    }
+
+    /**
+     * Update the default view when viewing a contact.
+     * The default view can be either the life events feed or the general data
+     * about the contact (notes, reminders, ...).
+     * Possible values: life-events | notes.
+     *
+     * @param  Request $request
+     * @return string
+     */
+    public function updateDefaultProfileView(Request $request)
+    {
+        $allowedValues = ['life-events', 'notes', 'photos'];
+        /** @var string */
+        $view = $request->input('name');
+
+        if (! in_array($view, $allowedValues)) {
+            return 'not allowed';
+        }
+
+        auth()->user()->profile_active_tab = $view;
+
+        if ($view == 'life-events') {
+            auth()->user()->profile_new_life_event_badge_seen = true;
+        }
+
+        auth()->user()->save();
+
+        return $view;
     }
 }

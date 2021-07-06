@@ -8,13 +8,13 @@
   <div class="breadcrumb">
     <div class="{{ Auth::user()->getFluidLayout() }}">
       <div class="row">
-        <div class="col-xs-12">
+        <div class="col-12">
           <ul class="horizontal">
             <li>
-              <a href="/dashboard">{{ trans('app.breadcrumb_dashboard') }}</a>
+              <a href="{{ route('dashboard.index') }}">{{ trans('app.breadcrumb_dashboard') }}</a>
             </li>
             <li>
-              <a href="/settings">{{ trans('app.breadcrumb_settings') }}</a>
+              <a href="{{ route('settings.index') }}">{{ trans('app.breadcrumb_settings') }}</a>
             </li>
             <li>
               {{ trans('app.breadcrumb_settings_users') }}
@@ -30,13 +30,13 @@
 
       @include('settings._sidebar')
 
-      <div class="col-xs-12 col-sm-9 users-list">
+      <div class="col-12 col-sm-9 users-list">
 
         <div class="br3 ba b--gray-monica bg-white mb4">
           <div class="pa3 bb b--gray-monica">
             <h3 class="with-actions">
               {{ trans('settings.users_list_title') }}
-              <a href="/settings/users/add" class="btn">{{ trans('settings.users_list_add_user') }}</a>
+              <a href="{{ route('settings.users.create') }}" class="btn">{{ trans('settings.users_list_add_user') }}</a>
             </h3>
             <ul class="table">
             @foreach ($users as $user)
@@ -48,16 +48,15 @@
                   @if ($user->id == auth()->user()->id)
                     {{ trans('settings.users_list_you') }}
                   @else
-                    <a href="#" onclick="if (confirm('{{ trans('settings.users_list_delete_confirmation') }}')) { $(this).closest('.table-row').find('.entry-delete-form').submit(); } return false;">
-                      <i class="fa fa-trash-o" aria-hidden="true"></i>
-                    </a>
+                    <form method="POST" action="{{ route('settings.users.destroy', $user) }}">
+                      @method('DELETE')
+                      @csrf
+                      <confirm message="{{ trans('settings.users_list_delete_confirmation') }}">
+                        <i class="fa fa-trash-o" aria-hidden="true"></i>
+                      </confirm>
+                    </form>
                   @endif
                 </div>
-
-                <form method="POST" action="{{ action('SettingsController@deleteAdditionalUser', $user) }}" class="entry-delete-form hidden">
-                  {{ method_field('DELETE') }}
-                  {{ csrf_field() }}
-                </form>
               </li>
             @endforeach
             </ul>
@@ -80,15 +79,14 @@
                       {{ trans('settings.users_list_invitations_sent_date', ['date' => \App\Helpers\DateHelper::getShortDate($invitation->created_at)]) }}
                     </div>
                     <div class="table-cell actions">
-                      <a href="#" onclick="if (confirm('{{ trans('settings.users_invitations_delete_confirmation') }}')) { $(this).closest('.table-row').find('.entry-delete-form').submit(); } return false;">
-                        <i class="fa fa-trash-o" aria-hidden="true"></i>
-                      </a>
+                      <form method="POST" action="{{ route('settings.users.invitation.delete', $invitation) }}">
+                        @method('DELETE')
+                        @csrf
+                        <confirm message="{{ trans('settings.users_invitations_delete_confirmation') }}">
+                          <i class="fa fa-trash-o" aria-hidden="true"></i>
+                        </confirm>
+                      </form>
                     </div>
-
-                    <form method="POST" action="{{ action('SettingsController@destroyInvitation', $invitation) }}" class="entry-delete-form hidden">
-                      {{ method_field('DELETE') }}
-                      {{ csrf_field() }}
-                    </form>
                   </li>
               @endforeach
               </ul>

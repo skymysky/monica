@@ -2,14 +2,18 @@
 
 namespace App\Http\Resources\Journal;
 
-use Illuminate\Http\Resources\Json\Resource;
+use App\Helpers\DateHelper;
+use Illuminate\Http\Resources\Json\JsonResource;
 
-class Entry extends Resource
+/**
+ * @extends JsonResource<\App\Models\Journal\Entry>
+ */
+class Entry extends JsonResource
 {
     /**
      * Transform the resource into an array.
      *
-     * @param  \Illuminate\Http\Request
+     * @param  \Illuminate\Http\Request $request
      * @return array
      */
     public function toArray($request)
@@ -19,11 +23,13 @@ class Entry extends Resource
             'object' => 'entry',
             'title' => $this->title,
             'post' => $this->post,
+            'date' => $this->date,
+            'url' => route('api.entry', $this->id),
             'account' => [
                 'id' => $this->account_id,
             ],
-            'created_at' => $this->created_at->format(config('api.timestamp_format')),
-            'updated_at' => (is_null($this->updated_at) ? null : $this->updated_at->format(config('api.timestamp_format'))),
+            'created_at' => DateHelper::getTimestamp($this->created_at),
+            'updated_at' => DateHelper::getTimestamp($this->updated_at),
         ];
     }
 }

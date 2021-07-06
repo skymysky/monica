@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Contacts;
 
-use App\Pet;
-use App\Contact;
-use App\PetCategory;
+use App\Models\Contact\Pet;
+use App\Models\Contact\Contact;
+use App\Models\Contact\PetCategory;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\People\PetsRequest;
 
@@ -35,7 +35,7 @@ class PetsController extends Controller
      * Get all the pets for this contact.
      * @param  Contact $contact
      */
-    public function get(Contact $contact)
+    public function index(Contact $contact)
     {
         $petsCollection = collect([]);
         $pets = $contact->pets;
@@ -59,13 +59,15 @@ class PetsController extends Controller
      */
     public function store(PetsRequest $request, Contact $contact)
     {
+        $contact->throwInactive();
+
         $pet = $contact->pets()->create(
             $request->only([
                 'pet_category_id',
                 'name',
             ])
             + [
-                'account_id' => auth()->user()->account->id,
+                'account_id' => auth()->user()->account_id,
             ]
         );
 
@@ -83,13 +85,15 @@ class PetsController extends Controller
      */
     public function update(PetsRequest $request, Contact $contact, Pet $pet)
     {
+        $contact->throwInactive();
+
         $pet->update(
             $request->only([
                 'pet_category_id',
                 'name',
             ])
             + [
-                'account_id' => auth()->user()->account->id,
+                'account_id' => auth()->user()->account_id,
             ]
         );
 
@@ -102,7 +106,7 @@ class PetsController extends Controller
         ];
     }
 
-    public function trash(Contact $contact, Pet $pet)
+    public function destroy(Contact $contact, Pet $pet)
     {
         $pet->delete();
     }

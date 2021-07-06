@@ -8,13 +8,13 @@
   <div class="breadcrumb">
     <div class="{{ Auth::user()->getFluidLayout() }}">
       <div class="row">
-        <div class="col-xs-12">
+        <div class="col-12">
           <ul class="horizontal">
             <li>
-              <a href="/dashboard">{{ trans('app.breadcrumb_dashboard') }}</a>
+              <a href="{{ route('dashboard.index') }}">{{ trans('app.breadcrumb_dashboard') }}</a>
             </li>
             <li>
-              <a href="/settings">{{ trans('app.breadcrumb_settings') }}</a>
+              <a href="{{ route('settings.index') }}">{{ trans('app.breadcrumb_settings') }}</a>
             </li>
             <li>
               {{ trans('app.breadcrumb_settings_subscriptions') }}
@@ -57,9 +57,9 @@
         </svg>
       </div>
 
-      <h2 class="tc mt2 fw4">Thank you! You are now subscribed.</h2>
-      <p class="tc mb4">Welcome to the community of people who try to make the world a better place.</p>
-      <p class="tc"><a href="{{ url('/settings/subscriptions') }}" class="btn btn-primary">Back to Settings</a></p>
+      <h2 class="tc mt2 fw4">{{ trans('settings.subscriptions_upgrade_success') }}</h2>
+      <p class="tc mb4">{{ trans('settings.subscriptions_upgrade_thanks') }}</p>
+      <p class="tc"><a href="settings/subscriptions" class="btn btn-primary">{{ trans('settings.subscriptions_back') }}</a></p>
     </div>
   </div>
 </div>

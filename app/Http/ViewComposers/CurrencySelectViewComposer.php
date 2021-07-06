@@ -2,15 +2,11 @@
 
 namespace App\Http\ViewComposers;
 
-use App\Currency;
 use Illuminate\View\View;
+use App\Models\Settings\Currency;
 
 class CurrencySelectViewComposer
 {
-    public function __construct()
-    {
-    }
-
     /**
      * Bind data to the view.
      *

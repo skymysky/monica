@@ -10,7 +10,8 @@ class ApiControllerTest extends ApiTestCase
 {
     use DatabaseTransactions;
 
-    public function test_get_http_status_code_returns_the_status_code()
+    /** @test */
+    public function get_http_status_code_returns_the_status_code()
     {
         $apiController = new ApiController;
 
@@ -27,7 +28,8 @@ class ApiControllerTest extends ApiTestCase
         );
     }
 
-    public function test_get_error_code_returns_the_error_code()
+    /** @test */
+    public function get_error_code_returns_the_error_code()
     {
         $apiController = new ApiController;
 
@@ -44,7 +46,26 @@ class ApiControllerTest extends ApiTestCase
         );
     }
 
-    public function test_get_limit_per_page_code_returns_the_limit_per_page()
+    /** @test */
+    public function get_with_parameter_returns_the_parameter()
+    {
+        $apiController = new ApiController;
+
+        $this->assertEquals(
+            null,
+            $apiController->getWithParameter()
+        );
+
+        $apiController->setWithParameter('test');
+
+        $this->assertEquals(
+            'test',
+            $apiController->getWithParameter()
+        );
+    }
+
+    /** @test */
+    public function get_limit_per_page_code_returns_the_limit_per_page()
     {
         $apiController = new ApiController;
 
@@ -61,7 +82,8 @@ class ApiControllerTest extends ApiTestCase
         );
     }
 
-    public function test_it_gets_the_sort_criteria()
+    /** @test */
+    public function it_gets_the_sort_criteria()
     {
         $apiController = new ApiController;
 
@@ -78,7 +100,8 @@ class ApiControllerTest extends ApiTestCase
         );
     }
 
-    public function test_it_only_accepts_some_sorting_parameters()
+    /** @test */
+    public function it_only_accepts_some_sorting_parameters()
     {
         $apiController = new ApiController;
 
@@ -91,12 +114,14 @@ class ApiControllerTest extends ApiTestCase
 
         $apiController->setSortCriteria('anything');
 
-        $this->assertNull(
+        $this->assertEquals(
+            '',
             $apiController->getSortCriteria()
         );
     }
 
-    public function test_calling_api_with_insane_limit_number_raises_an_error()
+    /** @test */
+    public function calling_api_with_insane_limit_number_raises_an_error()
     {
         $user = $this->signin();
 
@@ -107,12 +132,13 @@ class ApiControllerTest extends ApiTestCase
         $response->assertStatus(400);
 
         $response->assertJsonFragment([
-            'message' => 'The limit parameter is too big.',
+            'message' => 'The limit parameter is too big',
             'error_code' => 30,
         ]);
     }
 
-    public function test_calling_api_with_a_wrong_sort_parameter_raises_an_error()
+    /** @test */
+    public function calling_api_with_a_wrong_sort_parameter_raises_an_error()
     {
         $user = $this->signin();
 
@@ -128,7 +154,8 @@ class ApiControllerTest extends ApiTestCase
         ]);
     }
 
-    public function test_it_sets_the_order_by_parameters()
+    /** @test */
+    public function it_sets_the_order_by_parameters()
     {
         $apiController = new ApiController;
 
@@ -155,5 +182,24 @@ class ApiControllerTest extends ApiTestCase
             'desc',
             $apiController->getSortDirection()
         );
+    }
+
+    /** @test */
+    public function root_api()
+    {
+        $user = $this->signin();
+
+        $response = $this->json('GET', '/api');
+
+        $response->assertStatus(200);
+
+        $response->assertJsonFragment([
+            'success' => [
+                'message' => 'Welcome to Monica',
+            ],
+        ]);
+        $response->assertJsonFragment([
+            'contacts_url' => route('api.contacts'),
+        ]);
     }
 }

@@ -8,13 +8,13 @@
   <div class="breadcrumb">
     <div class="{{ Auth::user()->getFluidLayout() }}">
       <div class="row">
-        <div class="col-xs-12">
+        <div class="col-12">
           <ul class="horizontal">
             <li>
-              <a href="/dashboard">{{ trans('app.breadcrumb_dashboard') }}</a>
+              <a href="{{ route('dashboard.index') }}">{{ trans('app.breadcrumb_dashboard') }}</a>
             </li>
             <li>
-              <a href="/settings">{{ trans('app.breadcrumb_settings') }}</a>
+              <a href="{{ route('settings.index') }}">{{ trans('app.breadcrumb_settings') }}</a>
             </li>
             <li>
               {{ trans('app.breadcrumb_settings_personalization') }}
@@ -30,7 +30,7 @@
 
       @include('settings._sidebar')
 
-      <div class="col-xs-12 col-sm-9">
+      <div class="col-12 col-sm-9">
 
         <div class="mb3">
           <h3 class="f3 fw5">{{ trans('settings.personalization_tab_title') }}</h3>
@@ -52,6 +52,24 @@
         <div class="br3 ba b--gray-monica bg-white mb4">
           <div class="pa3 bb b--gray-monica">
             <contact-field-types></contact-field-types>
+          </div>
+        </div>
+
+        <div class="br3 ba b--gray-monica bg-white mb4">
+          <div class="pa3 bb b--gray-monica">
+            <activity-types :limited="{{ \Safe\json_encode($accountHasLimitations) }}"></activity-types>
+          </div>
+        </div>
+
+        <div class="br3 ba b--gray-monica bg-white mb4">
+          <div class="pa3 bb b--gray-monica">
+            <life-event-types :limited="{{ \Safe\json_encode($accountHasLimitations) }}"></life-event-types>
+          </div>
+        </div>
+
+        <div class="br3 ba b--gray-monica bg-white mb4">
+          <div class="pa3 bb b--gray-monica">
+            <modules :limited="{{ \Safe\json_encode($accountHasLimitations) }}"></modules>
           </div>
         </div>
 

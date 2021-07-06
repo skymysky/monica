@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers\Contacts;
 
-use App\Note;
-use App\Contact;
+use App\Helpers\DateHelper;
+use App\Models\Contact\Note;
+use App\Models\Contact\Contact;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\People\NotesRequest;
 use App\Http\Requests\People\NoteToggleRequest;
@@ -13,7 +14,7 @@ class NotesController extends Controller
     /**
      * Get all the tasks of this contact.
      */
-    public function get(Contact $contact)
+    public function index(Contact $contact)
     {
         $notesCollection = collect([]);
         $notes = $contact->notes()->latest()->get();
@@ -24,9 +25,9 @@ class NotesController extends Controller
                 'body' => $note->body,
                 'is_favorited' => $note->is_favorited,
                 'favorited_at' => $note->favorited_at,
-                'favorited_at_short' => \App\Helpers\DateHelper::getShortDate($note->favorited_at),
+                'favorited_at_short' => DateHelper::getShortDate($note->favorited_at),
                 'created_at' => $note->created_at,
-                'created_at_short' => \App\Helpers\DateHelper::getShortDate($note->created_at),
+                'created_at_short' => DateHelper::getShortDate($note->created_at),
                 'edit' => false,
             ];
             $notesCollection->push($data);
@@ -40,14 +41,12 @@ class NotesController extends Controller
      */
     public function store(NotesRequest $request, Contact $contact)
     {
-        $note = $contact->notes()->create([
-            'account_id' => auth()->user()->account->id,
-            'body' => $request->get('body'),
+        $contact->throwInactive();
+
+        return $contact->notes()->create([
+            'account_id' => auth()->user()->account_id,
+            'body' => $request->input('body'),
         ]);
-
-        $contact->logEvent('note', $note->id, 'create');
-
-        return $note;
     }
 
     public function toggle(NoteToggleRequest $request, Contact $contact, Note $note)
@@ -58,10 +57,8 @@ class NotesController extends Controller
             $note->is_favorited = false;
         } else {
             $note->is_favorited = true;
-            $note->favorited_at = \Carbon\Carbon::now();
+            $note->favorited_at = now();
         }
-
-        $contact->logEvent('note', $note->id, 'update');
 
         $note->save();
     }
@@ -72,18 +69,19 @@ class NotesController extends Controller
      * @param NotesRequest $request
      * @param Contact $contact
      * @param Note $note
-     * @return \Illuminate\Http\Response
+     *
+     * @return Note
      */
-    public function update(NotesRequest $request, Contact $contact, Note $note)
+    public function update(NotesRequest $request, Contact $contact, Note $note): Note
     {
+        $contact->throwInactive();
+
         $note->update(
             $request->only([
                 'body',
             ])
             + ['account_id' => $contact->account_id]
         );
-
-        $contact->logEvent('note', $note->id, 'update');
 
         return $note;
     }
@@ -93,12 +91,13 @@ class NotesController extends Controller
      *
      * @param Contact $contact
      * @param Note $note
-     * @return \Illuminate\Http\Response
+     *
+     * @return void
      */
-    public function destroy(Contact $contact, Note $note)
+    public function destroy(Contact $contact, Note $note): void
     {
-        $note->delete();
+        $contact->throwInactive();
 
-        $contact->events()->forObject($note)->get()->each->delete();
+        $note->delete();
     }
 }

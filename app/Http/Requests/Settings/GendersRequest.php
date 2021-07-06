@@ -2,20 +2,12 @@
 
 namespace App\Http\Requests\Settings;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Models\Contact\Gender;
+use Illuminate\Validation\Rule;
+use App\Http\Requests\AuthorizedRequest;
 
-class GendersRequest extends FormRequest
+class GendersRequest extends AuthorizedRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     *
-     * @return bool
-     */
-    public function authorize()
-    {
-        return true;
-    }
-
     /**
      * Get the validation rules that apply to the request.
      *
@@ -24,6 +16,7 @@ class GendersRequest extends FormRequest
     public function rules()
     {
         return [
+            'type' => ['required', Rule::in(Gender::LIST)],
             'name' => 'max:255',
             'id' => 'integer',
         ];

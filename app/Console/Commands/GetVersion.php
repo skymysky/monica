@@ -21,21 +21,11 @@ class GetVersion extends Command
     protected $description = 'Get current version of monica';
 
     /**
-     * Create a new command instance.
+     * Execute the console command.
      *
      * @return void
      */
-    public function __construct()
-    {
-        parent::__construct();
-    }
-
-    /**
-     * Execute the console command.
-     *
-     * @return mixed
-     */
-    public function handle()
+    public function handle(): void
     {
         $this->line(config('monica.app_version'));
     }

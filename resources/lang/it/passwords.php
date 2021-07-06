@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * ⚠️ Editing not allowed except for 'en' language.
+ *
+ * @see https://github.com/monicahq/monica/blob/master/docs/contribute/translate.md for translations.
+ */
+
 return [
 
     /*
@@ -13,12 +19,12 @@ return [
     |
     */
 
-    'password' => 'Le password devono essere di almeno sei caratteri e devono combaciare con la conferma.',
-    'reset' => 'La tua password è stata reimpostata!',
-    'sent' => "Se l'email inserita esiste nei nostri archivi vi é stato inviato il link per reimpostare la tua password.",
+    'reset' => 'La password è stata reimpostata!',
+    'sent' => 'Se l\'email inserita esiste nei nostri archivi vi é stato inviato il link per reimpostare la tua password.',
     'token' => 'Questo token per reimpostare la password non è valido.',
-    'user' => "Se l'email inserita esiste nei nostri archivi vi é stato inviato il link per reimpostare la tua password.",
-    'changed' => 'Password changed successfuly.',
-    'invalid' => 'Current password you entered is not correct.',
+    'user' => 'Se l\'email inserita esiste nei nostri archivi vi é stato inviato il link per reimpostare la tua password.',
+    'changed' => 'Password modificata con successo.',
+    'invalid' => 'La password inserita non è corretta.',
+    'throttled' => 'Per favore attendere prima di riprovare.',
 
 ];

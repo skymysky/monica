@@ -2,52 +2,76 @@
 
 namespace App\Http\Controllers\Contacts;
 
-use App\Contact;
+use Illuminate\Http\Request;
+use App\Models\Contact\Contact;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\People\TagsRequest;
+use App\Services\Contact\Tag\DetachTag;
+use App\Services\Contact\Tag\AssociateTag;
+use App\Http\Resources\Tag\Tag as TagResource;
 
 class TagsController extends Controller
 {
     /**
+     * Get the list of all the tags in the account.
+     *
+     * @param Request $request
+     *
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     */
+    public function index(Request $request)
+    {
+        $tags = auth()->user()->account->tags()->get();
+
+        return TagResource::collection($tags);
+    }
+
+    /**
+     * Get the list of all the tags for this contact.
+     *
+     * @param Request $request
+     *
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection
+     */
+    public function get(Request $request, Contact $contact)
+    {
+        $tags = $contact->tags()->get();
+
+        return TagResource::collection($tags);
+    }
+
+    /**
      * Update the specified resource in storage.
      *
-     * @param GiftsRequest $request
+     * @param Request $request
      * @param Contact $contact
-     * @param Gift $gift
-     * @return \Illuminate\Http\Response
+     *
+     * @return void
      */
-    public function update(TagsRequest $request, Contact $contact)
+    public function update(Request $request, Contact $contact): void
     {
-        if (auth()->user()->account_id != $contact->account_id) {
-            return response()->json(['status' => 'no']);
-        }
+        $contact->throwInactive();
 
-        $tags = explode(',', $request->input('tags'));
+        $tags = $request->all();
 
-        // if we receive an empty string, that means all tags have been removed.
-        if ($request->input('tags') == '') {
-            $contact->unsetTags();
-
-            return response()->json(['status' => 'no', 'tags' => '']);
-        }
-
-        $tagsIDs = [];
-        $tagsWithIdAndSlug = [];
-        foreach ($tags as $tag) {
-            $tag = $contact->setTag($tag);
-
-            // this is passed back in json to JS
-            array_push($tagsWithIdAndSlug, [
-              'id' => $tag->id,
-              'slug' => $tag->name_slug,
+        // detaching all the tags
+        $contactTags = $contact->tags()->get();
+        foreach ($contactTags as $tag) {
+            app(DetachTag::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'contact_id' => $contact->id,
+                'tag_id' => $tag->id,
             ]);
         }
 
-        $response = [
-          'status' => 'yes',
-          'tags' => $tagsWithIdAndSlug,
-        ];
-
-        return response()->json($response);
+        // attach all the new/updated tags
+        foreach ($tags as $tag) {
+            if (! empty($tag['name'])) {
+                app(AssociateTag::class)->execute([
+                    'account_id' => auth()->user()->account_id,
+                    'contact_id' => $contact->id,
+                    'name' => $tag['name'],
+                ]);
+            }
+        }
     }
 }

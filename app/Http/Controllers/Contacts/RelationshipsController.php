@@ -2,232 +2,274 @@
 
 namespace App\Http\Controllers\Contacts;
 
-use App\Contact;
-use App\Relationship;
+use Illuminate\View\View;
+use App\Helpers\DateHelper;
+use App\Helpers\FormHelper;
+use Illuminate\Http\Request;
+use App\Helpers\GenderHelper;
+use App\Models\Contact\Contact;
+use Illuminate\Support\Collection;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\People\RelationshipsRequest;
-use App\Http\Requests\People\ExistingRelationshipsRequest;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\RedirectResponse;
+use App\Models\Relationship\Relationship;
+use Illuminate\Support\Facades\Validator;
+use App\Services\Contact\Contact\CreateContact;
+use App\Services\Contact\Contact\UpdateContact;
+use App\Services\Contact\Relationship\CreateRelationship;
+use App\Services\Contact\Relationship\UpdateRelationship;
+use App\Services\Contact\Relationship\DestroyRelationship;
+use App\Http\Resources\Contact\ContactShort as ContactResource;
 
 class RelationshipsController extends Controller
 {
     /**
-     * Display a listing of the resource.
+     * Display the Create relationship page.
      *
      * @param Contact $contact
-     * @return \Illuminate\Http\Response
+     *
+     * @return View
      */
-    public function index(Contact $contact)
+    public function create(Request $request, Contact $contact)
     {
-        return view('people.relationship.index')
-            ->withContact($contact);
-    }
+        $existingContacts = Contact::search('', Auth::user()->account_id, 'updated_at')
+            ->whereNotIn('id', [$contact->id])
+            ->paginate(20);
 
-    /**
-     * Show the form for creating a new resource.
-     *
-     * @param Contact $contact
-     * @return \Illuminate\Http\Response
-     */
-    public function create(Contact $contact)
-    {
-        return view('people.relationship.add')
+        return view('people.relationship.new')
             ->withContact($contact)
             ->withPartner(new Contact)
-            ->withGenders(auth()->user()->account->genders);
+            ->withGenders(GenderHelper::getGendersInput())
+            ->withRelationshipTypes($this->getRelationshipTypesList($contact))
+            ->withDefaultGender(auth()->user()->account->default_gender_id)
+            ->withDays(DateHelper::getListOfDays())
+            ->withMonths(DateHelper::getListOfMonths())
+            ->withBirthdate(now(DateHelper::getTimezone())->toDateString())
+            ->withExistingContacts(ContactResource::collection($existingContacts))
+            ->withType($request->input('type'))
+            ->withFormNameOrder(FormHelper::getNameOrderForForms(auth()->user()));
     }
 
     /**
      * Store a newly created resource in storage.
      *
-     * @param RelationshipsRequest $request
+     * @param Request $request
      * @param Contact $contact
-     * @return \Illuminate\Http\Response
-     */
-    public function store(RelationshipsRequest $request, Contact $contact)
-    {
-        // this is a real contact, not just a significant other
-        if ($request->get('realContact')) {
-            $partner = Contact::create(
-                $request->only([
-                    'first_name',
-                    'last_name',
-                    'gender_id',
-                ])
-                + [
-                    'account_id' => $contact->account_id,
-                ]
-            );
-
-            $partner->logEvent('contact', $partner->id, 'create');
-
-            $contact->setRelationshipWith($partner, true);
-        } else {
-            $partner = Contact::create(
-                $request->only([
-                    'first_name',
-                    'last_name',
-                    'gender_id',
-                ])
-                + [
-                    'account_id' => $contact->account_id,
-                    'is_partial' => 1,
-                ]
-            );
-
-            $contact->setRelationshipWith($partner);
-        }
-
-        $partner->setAvatarColor();
-
-        // birthdate
-        $partner->removeSpecialDate('birthdate');
-        switch ($request->input('birthdate')) {
-            case 'unknown':
-                break;
-            case 'approximate':
-                $specialDate = $partner->setSpecialDateFromAge('birthdate', $request->input('age'));
-                break;
-            case 'exact':
-                $specialDate = $partner->setSpecialDate('birthdate', $request->input('birthdate_year'), $request->input('birthdate_month'), $request->input('birthdate_day'));
-                $newReminder = $specialDate->setReminder('year', 1, trans('people.people_add_birthday_reminder', ['name' => $partner->first_name]));
-                break;
-        }
-
-        return redirect('/people/'.$contact->id)
-            ->with('success', trans('people.significant_other_add_success'));
-    }
-
-    /**
-     * Store an existing contact as a significant other. When we add this kind of
-     * relationship, we need to create two Relationship records, to match with
-     * the bidirectional nature of the relationship.
      *
-     * @param ExistingRelationshipsRequest $request
-     * @param Contact $contact
-     * @return \Illuminate\Http\Response
+     * @return RedirectResponse
      */
-    public function storeExistingContact(ExistingRelationshipsRequest $request, Contact $contact)
+    public function store(Request $request, Contact $contact)
     {
-        $partner = Contact::findOrFail($request->get('existingPartner'));
-        $contact->setRelationshipWith($partner, true);
+        // case of linking to an existing contact
+        if ($request->input('relationship_type') == 'existing') {
+            $partnerId = $request->input('existing_contact_id');
+        } else {
 
-        return redirect('/people/'.$contact->id)
-            ->with('success', trans('people.significant_other_add_success'));
+            // case of creating a new contact
+            $datas = $this->validateAndGetDatas($request);
+
+            if ($datas instanceof \Illuminate\Contracts\Validation\Validator) {
+                return back()
+                    ->withInput()
+                    ->withErrors($datas);
+            }
+
+            $partner = app(CreateContact::class)->execute($datas);
+            $partnerId = $partner->id;
+        }
+
+        app(CreateRelationship::class)->execute([
+            'account_id' => auth()->user()->account_id,
+            'contact_is' => $contact->id,
+            'of_contact' => $partnerId,
+            'relationship_type_id' => $request->input('relationship_type_id'),
+        ]);
+
+        return redirect()->route('people.show', $contact)
+            ->with('success', trans('people.relationship_form_add_success'));
     }
 
     /**
      * Show the form for editing the specified resource.
      *
      * @param Contact $contact
-     * @param SignificantOther $significantOther
-     * @return \Illuminate\Http\Response
+     * @param Relationship $relationship
+     *
+     * @return View
      */
-    public function edit(Contact $contact, Contact $partner)
+    public function edit(Contact $contact, Relationship $relationship)
     {
+        $contact->throwInactive();
+
+        $otherContact = $relationship->ofContact;
+
+        $now = now();
+        $age = (string) (! is_null($otherContact->birthdate) ? $otherContact->birthdate->getAge() : 0);
+        $birthdate = ! is_null($otherContact->birthdate) ? $otherContact->birthdate->date->toDateString() : $now->toDateString();
+        $day = ! is_null($otherContact->birthdate) ? $otherContact->birthdate->date->day : $now->day;
+        $month = ! is_null($otherContact->birthdate) ? $otherContact->birthdate->date->month : $now->month;
+
+        $hasBirthdayReminder = is_null($otherContact->birthday_reminder_id) ? 0 : 1;
+
         return view('people.relationship.edit')
             ->withContact($contact)
-            ->withPartner($partner)
-            ->withGenders(auth()->user()->account->genders);
+            ->withPartner($otherContact)
+            ->withGenders(auth()->user()->account->genders)
+            ->withRelationshipTypes($this->getRelationshipTypesList($contact))
+            ->withDays(DateHelper::getListOfDays())
+            ->withMonths(DateHelper::getListOfMonths())
+            ->withBirthdate($birthdate)
+            ->withRelationshipId($relationship->id)
+            ->withType($relationship->relationship_type_id)
+            ->withBirthdayState($otherContact->getBirthdayState())
+            ->withDay($day)
+            ->withMonth($month)
+            ->withAge($age)
+            ->withGenders(GenderHelper::getGendersInput())
+            ->withHasBirthdayReminder($hasBirthdayReminder)
+            ->withFormNameOrder(FormHelper::getNameOrderForForms(auth()->user()));
     }
 
     /**
      * Update the specified resource in storage.
      *
-     * @param RelationshipsRequest $request
+     * @param Request $request
      * @param Contact $contact
-     * @param SignificantOther $significantOther
-     * @return \Illuminate\Http\Response
+     * @param Relationship $relationship
+     *
+     * @return RedirectResponse
      */
-    public function update(RelationshipsRequest $request, Contact $contact, Contact $partner)
+    public function update(Request $request, Contact $contact, Relationship $relationship)
     {
-        $partner->update(
-            $request->only([
-                'first_name',
-                'last_name',
-                'gender_id',
-            ])
-            + [
-                'account_id' => $contact->account_id,
-            ]
-        );
+        $otherContact = $relationship->ofContact;
 
-        if ($request->get('realContact')) {
-            $partner->update([
-                'is_partial' => 0,
-                ]
-            );
+        if ($otherContact->is_partial) {
+            $datas = $this->validateAndGetDatas($request);
 
-            $contact->updateRelationshipWith($partner);
+            if ($datas instanceof \Illuminate\Contracts\Validation\Validator) {
+                return back()
+                    ->withInput()
+                    ->withErrors($datas);
+            }
+
+            app(UpdateContact::class)->execute($datas + [
+                'contact_id' => $otherContact->id,
+                'author_id' => auth()->user()->id,
+            ]);
         }
 
-        // birthdate
-        $partner->removeSpecialDate('birthdate');
-        switch ($request->input('birthdate')) {
-            case 'unknown':
-                break;
-            case 'approximate':
-                $specialDate = $partner->setSpecialDateFromAge('birthdate', $request->input('age'));
-                break;
-            case 'exact':
-                $specialDate = $partner->setSpecialDate('birthdate', $request->input('birthdate_year'), $request->input('birthdate_month'), $request->input('birthdate_day'));
-                $newReminder = $specialDate->setReminder('year', 1, trans('people.people_add_birthday_reminder', ['name' => $partner->first_name]));
-                break;
+        // update the relationship
+        app(UpdateRelationship::class)->execute([
+            'account_id' => auth()->user()->account_id,
+            'relationship_id' => $relationship->id,
+            'relationship_type_id' => $request->input('relationship_type_id'),
+        ]);
+
+        return redirect()->route('people.show', $contact)
+            ->with('success', trans('people.relationship_form_add_success'));
+    }
+
+    /**
+     * Validate datas and get an array for create or update a contact.
+     *
+     * @param Request $request
+     * @return array|\Illuminate\Contracts\Validation\Validator
+     */
+    private function validateAndGetDatas(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'first_name' => 'required|max:255',
+            'last_name' => 'max:255',
+            'gender_id' => 'nullable|integer',
+            'birthdayDate' => 'date_format:Y-m-d',
+        ]);
+
+        if ($validator->fails()) {
+            return $validator;
         }
 
-        return redirect('/people/'.$contact->id)
-            ->with('success', trans('people.significant_other_edit_success'));
+        // this is really ugly. it should be changed
+        if ($request->input('birthdate') == 'exact') {
+            $birthdate = $request->input('birthdayDate');
+            $birthdate = DateHelper::parseDate($birthdate);
+            $day = $birthdate->day;
+            $month = $birthdate->month;
+            $year = $birthdate->year;
+        } else {
+            $day = $request->input('day');
+            $month = $request->input('month');
+            $year = $request->input('year');
+        }
+
+        return [
+            'account_id' => auth()->user()->account_id,
+            'author_id' => auth()->user()->id,
+            'first_name' => $request->input('first_name'),
+            'last_name' => $request->input('last_name'),
+            'gender_id' => $request->input('gender_id'),
+            'is_birthdate_known' => ! empty($request->input('birthdate')) && $request->input('birthdate') !== 'unknown',
+            'birthdate_day' => $day,
+            'birthdate_month' => $month,
+            'birthdate_year' => $year,
+            'birthdate_is_age_based' => $request->input('birthdate') === 'approximate',
+            'birthdate_age' => $request->input('age'),
+            'birthdate_add_reminder' => ! empty($request->input('addReminder')),
+            'is_partial' => ! $request->input('realContact'),
+            'is_deceased' => false,
+            'is_deceased_date_known' => false,
+        ];
     }
 
     /**
      * Remove the specified resource from storage.
      *
      * @param Contact $contact
-     * @param SignificantOther $significantOther
-     * @return \Illuminate\Http\Response
+     * @param Relationship $relationship
+     *
+     * @return RedirectResponse
      */
-    public function destroy(Contact $contact, Contact $partner)
+    public function destroy(Contact $contact, Relationship $relationship)
     {
         if ($contact->account_id != auth()->user()->account_id) {
-            return redirect('/people/');
+            return redirect()->route('people.index');
         }
 
-        if ($partner->account_id != auth()->user()->account_id) {
-            return redirect('/people/');
+        if ($relationship->account_id != auth()->user()->account_id) {
+            return redirect()->route('people.index');
         }
 
-        if ($partner->reminders) {
-            $partner->reminders()->get()->each->delete();
-        }
+        app(DestroyRelationship::class)->execute([
+            'account_id' => auth()->user()->account_id,
+            'relationship_id' => $relationship->id,
+        ]);
 
-        $contact->unsetRelationshipWith($partner);
-
-        $partner->specialDates->each->delete();
-        $partner->delete();
-
-        return redirect('/people/'.$contact->id)
-            ->with('success', trans('people.significant_other_delete_success'));
+        return redirect()->route('people.show', $contact)
+            ->with('success', trans('people.relationship_form_deletion_success'));
     }
 
     /**
-     * Unlink the relationship between those two people.
+     * Building the list of relationship types specifically for the dropdown which asks
+     * for an id and a name.
      *
-     * @param  Contact $contact
-     * @param  Contact $partner
-     * @return
+     * @return Collection
      */
-    public function unlink(Contact $contact, Contact $partner)
+    private function getRelationshipTypesList(Contact $contact)
     {
-        if ($contact->account_id != auth()->user()->account_id) {
-            return redirect('/people/');
+        $relationshipTypes = collect();
+        foreach (auth()->user()->account->relationshipTypes as $relationshipType) {
+            $types = $relationshipTypes->get($relationshipType->relationshipTypeGroup->name, [
+                'name' => trans('app.relationship_type_group_'.$relationshipType->relationshipTypeGroup->name),
+                'options' => [],
+            ]);
+
+            $types['options'][] = [
+                'id' => $relationshipType->id,
+                'name' => $relationshipType->getLocalizedName($contact, true),
+            ];
+
+            $relationshipTypes->put($relationshipType->relationshipTypeGroup->name, $types);
         }
 
-        if ($partner->account_id != auth()->user()->account_id) {
-            return redirect('/people/');
-        }
-
-        $contact->unsetRelationshipWith($partner, true);
-
-        return redirect('/people/'.$contact->id)
-            ->with('success', trans('people.significant_other_delete_success'));
+        return $relationshipTypes;
     }
 }

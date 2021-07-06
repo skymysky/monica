@@ -2,20 +2,11 @@
 
 namespace App\Http\Requests;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Models\User\User;
+use Illuminate\Validation\Rule;
 
-class SettingsRequest extends FormRequest
+class SettingsRequest extends AuthorizedRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     *
-     * @return bool
-     */
-    public function authorize()
-    {
-        return true;
-    }
-
     /**
      * Get the validation rules that apply to the request.
      *
@@ -26,11 +17,25 @@ class SettingsRequest extends FormRequest
         return [
             'first_name' => 'required|max:255',
             'last_name' => 'required|max:255',
-            'email' => 'required|email|max:2083|unique:users,email,'.$this->id,
-            'timezone' => '',
-            'layout' => '',
-            'locale' => '',
-            'currency_id' => '',
+            'email' => 'required|email|max:255|unique:users,email,'.$this->id,
+            'timezone' => 'required|string',
+            'fluid_container' => 'required|bool',
+            'temperature_scale' => [
+                'required',
+                'string',
+                Rule::in(['fahrenheit', 'celsius']),
+            ],
+            'locale' => [
+                'required',
+                'string',
+                Rule::In(config('lang-detector.languages')),
+            ],
+            'currency_id' => 'required|int|exists:currencies,id',
+            'name_order' => [
+                'required',
+                'string',
+                Rule::In(User::NAMES_ORDER),
+            ],
         ];
     }
 }

@@ -2,20 +2,10 @@
 
 namespace App\Http\Requests\People;
 
-use Illuminate\Foundation\Http\FormRequest;
+use App\Http\Requests\AuthorizedRequest;
 
-class GiftsRequest extends FormRequest
+class GiftsRequest extends AuthorizedRequest
 {
-    /**
-     * Determine if the user is authorized to make this request.
-     *
-     * @return bool
-     */
-    public function authorize()
-    {
-        return true;
-    }
-
     /**
      * Get the validation rules that apply to the request.
      *
@@ -29,7 +19,7 @@ class GiftsRequest extends FormRequest
             'url' => '',
             'offered' => 'string',
             'date_offered' => 'date|nullable',
-            'value' => 'int|nullable',
+            'value' => 'integer|nullable',
             'has_recipient' => 'boolean',
             'recipient' => 'required_with:has_recipient',
         ];

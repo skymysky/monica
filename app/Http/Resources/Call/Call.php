@@ -2,15 +2,20 @@
 
 namespace App\Http\Resources\Call;
 
-use Illuminate\Http\Resources\Json\Resource;
+use App\Helpers\DateHelper;
+use Illuminate\Http\Resources\Json\JsonResource;
+use App\Http\Resources\Emotion\Emotion as EmotionResource;
 use App\Http\Resources\Contact\ContactShort as ContactShortResource;
 
-class Call extends Resource
+/**
+ * @extends JsonResource<\App\Models\Contact\Call>
+ */
+class Call extends JsonResource
 {
     /**
      * Transform the resource into an array.
      *
-     * @param  \Illuminate\Http\Request
+     * @param  \Illuminate\Http\Request $request
      * @return array
      */
     public function toArray($request)
@@ -18,14 +23,17 @@ class Call extends Resource
         return [
             'id' => $this->id,
             'object' => 'call',
-            'called_at' => $this->created_at->format(config('api.timestamp_format')),
+            'called_at' => DateHelper::getTimestamp($this->called_at),
             'content' => $this->content,
+            'contact_called' => $this->contact_called,
+            'emotions' => EmotionResource::collection($this->emotions),
+            'url' => route('api.call', $this->id),
             'account' => [
-                'id' => $this->account->id,
+                'id' => $this->account_id,
             ],
             'contact' => new ContactShortResource($this->contact),
-            'created_at' => $this->created_at->format(config('api.timestamp_format')),
-            'updated_at' => (is_null($this->updated_at) ? null : $this->updated_at->format(config('api.timestamp_format'))),
+            'created_at' => DateHelper::getTimestamp($this->created_at),
+            'updated_at' => DateHelper::getTimestamp($this->updated_at),
         ];
     }
 }

@@ -1,5 +1,11 @@
 <?php
 
+/**
+ * ⚠️ Editing not allowed except for 'en' language.
+ *
+ * @see https://github.com/monicahq/monica/blob/master/docs/contribute/translate.md for translations.
+ */
+
 return [
 
     /*
@@ -13,12 +19,12 @@ return [
     |
     */
 
-    'password' => 'Hesla musí obsahovat alespoň šest znaků a oba zápisy se musí shodovat.',
-    'reset' => 'Heslo bylo resetováno!',
-    'sent' => 'Pokud byl zadaný email nalezen mezi uživateli, byl na něj odeslán odkaz na reset hesla!',
-    'token' => 'Toto není platný odkaz na reset hesla.',
-    'user' => 'Pokud byl zadaný email nalezen mezi uživateli, byl na něj odeslán odkaz na reset hesla!',
-    'changed' => 'Password changed successfuly.',
+    'reset' => 'Heslo bylo obnoveno!',
+    'sent' => 'E-mail s instrukcemi k obnovení hesla byl odeslán!',
+    'token' => 'Klíč pro obnovu hesla je nesprávný.',
+    'user' => 'Nepodařilo se najít uživatele s touto e-mailovou adresou.',
+    'changed' => 'Password changed successfully.',
     'invalid' => 'Current password you entered is not correct.',
+    'throttled' => 'Please wait before retrying.',
 
 ];

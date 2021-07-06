@@ -8,13 +8,13 @@
   <div class="breadcrumb">
     <div class="{{ auth()->user()->getFluidLayout() }}">
       <div class="row">
-        <div class="col-xs-12">
+        <div class="col-12">
           <ul class="horizontal">
             <li>
-              <a href="/dashboard">{{ trans('app.breadcrumb_dashboard') }}</a>
+              <a href="{{ route('dashboard.index') }}">{{ trans('app.breadcrumb_dashboard') }}</a>
             </li>
             <li>
-              <a href="/settings">{{ trans('app.breadcrumb_settings') }}</a>
+              <a href="{{ route('settings.index') }}">{{ trans('app.breadcrumb_settings') }}</a>
             </li>
             <li>
               {{ trans('app.breadcrumb_settings_security') }}
@@ -30,7 +30,7 @@
 
       @include('settings._sidebar')
 
-      <div class="col-xs-12 col-md-9">
+      <div class="col-12 col-md-9">
 
         <div class="br3 ba b--gray-monica bg-white mb4">
           <div class="pa3 bb b--gray-monica">
@@ -45,8 +45,8 @@
             <h3 class="with-actions">{{ trans('settings.security_title') }}</h3>
             <p>{{ trans('settings.security_help') }}</p>
 
-            <form method="POST" action="/settings/security/passwordChange" class="settings-reset">
-              {{ csrf_field() }}
+            <form method="POST" action="{{ route('settings.security.passwordChange') }}" class="settings-reset">
+              @csrf
 
               <h2>{{ trans('settings.password_change') }}</h2>
 
@@ -70,13 +70,24 @@
             <form class="settings-reset">
               <h2>{{ trans('settings.2fa_title') }}</h2>
 
-              <div class="form-group">
-                @if ($is2FAActivated)
-                  <a href="{{ url('settings/security/2fa-disable') }}" class="btn btn-warning">{{ trans('settings.2fa_disable_title') }}</a>
-                @else
-                  <a href="{{ url('settings/security/2fa-enable') }}" class="btn btn-primary">{{ trans('settings.2fa_enable_title') }}</a>
-                @endif
-              </div>
+              <recovery-codes></recovery-codes>
+
+              @if (config('google2fa.enabled')===true)
+                <mfa-activate
+                  :activated="{{ \Safe\json_encode($is2FAActivated) }}"
+                >
+                </mfa-activate>
+              @endif
+
+              @if (config('webauthn.enable')===true)
+                <webauthn-connector
+                  :method="'register-modal'"
+                  :keys="{{ \Safe\json_encode($webauthnKeys) }}"
+                  :timezone="{{ \Safe\json_encode(auth()->user()->timezone) }}"
+                >
+                </webauthn-connector>
+              @endif
+
             </form>
 
             @endif

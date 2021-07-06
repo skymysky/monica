@@ -2,10 +2,10 @@
 
 namespace App\Console\Commands;
 
-use DB;
-use App\Account;
-use App\Statistic;
+use App\Models\Account\Account;
 use Illuminate\Console\Command;
+use App\Models\Instance\Statistic;
+use Illuminate\Support\Facades\DB;
 
 class CalculateStatistics extends Command
 {
@@ -24,21 +24,11 @@ class CalculateStatistics extends Command
     protected $description = 'Calculate general usage statistics';
 
     /**
-     * Create a new command instance.
+     * Execute the console command.
      *
      * @return void
      */
-    public function __construct()
-    {
-        parent::__construct();
-    }
-
-    /**
-     * Execute the console command.
-     *
-     * @return mixed
-     */
-    public function handle()
+    public function handle(): void
     {
         $statistic = new Statistic;
         $statistic->number_of_users = DB::table('users')->count();
@@ -69,10 +59,10 @@ class CalculateStatistics extends Command
         $statistic->number_of_gifts = DB::table('gifts')->count();
         $statistic->number_of_oauth_access_tokens = DB::table('oauth_access_tokens')->count();
         $statistic->number_of_oauth_clients = DB::table('oauth_clients')->count();
-        $statistic->number_of_offsprings = DB::table('offsprings')->count();
-        $statistic->number_of_progenitors = DB::table('progenitors')->count();
         $statistic->number_of_relationships = DB::table('relationships')->count();
         $statistic->number_of_subscriptions = DB::table('subscriptions')->count();
+        $statistic->number_of_conversations = DB::table('conversations')->count();
+        $statistic->number_of_messages = DB::table('messages')->count();
 
         $statistic->save();
     }

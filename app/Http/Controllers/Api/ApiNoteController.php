@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Note;
-use Validator;
-use App\Contact;
+use App\Models\Contact\Note;
 use Illuminate\Http\Request;
+use App\Models\Contact\Contact;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Validator;
 use App\Http\Resources\Note\Note as NoteResource;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -15,20 +15,27 @@ class ApiNoteController extends ApiController
     /**
      * Get the list of notes.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection|\Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $notes = auth()->user()->account->notes()
-                                ->paginate($this->getLimitPerPage());
+        try {
+            $notes = auth()->user()->account->notes()
+                ->orderBy($this->sort, $this->sortDirection)
+                ->paginate($this->getLimitPerPage());
+        } catch (QueryException $e) {
+            return $this->respondInvalidQuery();
+        }
 
         return NoteResource::collection($notes);
     }
 
     /**
      * Get the detail of a given note.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return NoteResource|\Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
@@ -45,53 +52,42 @@ class ApiNoteController extends ApiController
 
     /**
      * Store the note.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return NoteResource|\Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        // Validates basic fields to create the entry
-        $validator = Validator::make($request->all(), [
-            'body' => 'required|max:100000',
-            'contact_id' => 'required|integer',
-            'is_favorited' => 'required|integer',
-        ]);
-
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
+        $isvalid = $this->validateUpdate($request);
+        if ($isvalid !== true) {
+            return $isvalid;
         }
 
         try {
-            $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $request->input('contact_id'))
-                ->firstOrFail();
-        } catch (ModelNotFoundException $e) {
-            return $this->respondNotFound();
-        }
-
-        try {
-            $note = Note::create($request->all());
+            $note = Note::create(
+                $request->except(['account_id'])
+                + ['account_id' => auth()->user()->account_id]
+            );
         } catch (QueryException $e) {
             return $this->respondNotTheRightParameters();
         }
 
-        if ($request->get('is_favorited')) {
-            $note->favorited_at = \Carbon\Carbon::now();
+        if ($request->input('is_favorited')) {
+            $note->favorited_at = now();
             $note->save();
         }
-
-        $note->account_id = auth()->user()->account->id;
-        $note->save();
 
         return new NoteResource($note);
     }
 
     /**
      * Update the note.
-     * @param  Request $request
-     * @param  int $noteId
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     * @param int $noteId
+     *
+     * @return NoteResource|\Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $noteId)
     {
@@ -103,46 +99,63 @@ class ApiNoteController extends ApiController
             return $this->respondNotFound();
         }
 
+        $isvalid = $this->validateUpdate($request);
+        if ($isvalid !== true) {
+            return $isvalid;
+        }
+
+        try {
+            $note->update($request->only(['body', 'contact_id', 'is_favorited']));
+        } catch (QueryException $e) {
+            return $this->respondNotTheRightParameters();
+        }
+
+        if ($request->input('is_favorited')) {
+            $note->favorited_at = now();
+        } else {
+            $note->favorited_at = null;
+        }
+        $note->save();
+
+        return new NoteResource($note);
+    }
+
+    /**
+     * Validate the request for update.
+     *
+     * @param  Request $request
+     * @return \Illuminate\Http\JsonResponse|true
+     */
+    private function validateUpdate(Request $request)
+    {
         // Validates basic fields to create the entry
         $validator = Validator::make($request->all(), [
             'body' => 'required|max:100000',
             'contact_id' => 'required|integer',
+            'is_favorited' => 'boolean',
         ]);
 
         if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
+            return $this->respondValidatorFailed($validator);
         }
 
         try {
-            $contact = Contact::where('account_id', auth()->user()->account_id)
+            Contact::where('account_id', auth()->user()->account_id)
                 ->where('id', $request->input('contact_id'))
                 ->firstOrFail();
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
         }
 
-        try {
-            $note->update($request->all());
-        } catch (QueryException $e) {
-            return $this->respondNotTheRightParameters();
-        }
-
-        if ($request->get('is_favorited')) {
-            $note->favorited_at = \Carbon\Carbon::now();
-            $note->save();
-        } else {
-            $note->favorited_at = null;
-            $note->save();
-        }
-
-        return new NoteResource($note);
+        return true;
     }
 
     /**
      * Delete a note.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy(Request $request, $noteId)
     {
@@ -162,7 +175,7 @@ class ApiNoteController extends ApiController
     /**
      * Get the list of notes for the given contact.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection|\Illuminate\Http\JsonResponse
      */
     public function notes(Request $request, $contactId)
     {
@@ -175,6 +188,7 @@ class ApiNoteController extends ApiController
         }
 
         $notes = $contact->notes()
+                ->orderBy($this->sort, $this->sortDirection)
                 ->paginate($this->getLimitPerPage());
 
         return NoteResource::collection($notes);

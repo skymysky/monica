@@ -2,18 +2,10 @@
 
 namespace App\Http\Requests;
 
-class PasswordChangeRequest extends Request
-{
-    /**
-     * Determine if the user is authorized to make this request.
-     *
-     * @return bool
-     */
-    public function authorize()
-    {
-        return true;
-    }
+use Illuminate\Validation\Rules\Password as PasswordRules;
 
+class PasswordChangeRequest extends AuthorizedRequest
+{
     /**
      * Get the validation rules that apply to the request.
      *
@@ -23,7 +15,7 @@ class PasswordChangeRequest extends Request
     {
         return [
             'password_current' => 'required',
-            'password' => 'required|confirmed|min:6',
+            'password' => ['required', 'confirmed', PasswordRules::defaults()],
         ];
     }
 }

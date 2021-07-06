@@ -2,19 +2,25 @@
 
 namespace App\Console\Commands;
 
-use App\Contact;
-use App\Instance;
 use GuzzleHttp\Client;
+use function Safe\json_decode;
+use App\Models\Contact\Contact;
 use Illuminate\Console\Command;
+use App\Models\Instance\Instance;
+use Illuminate\Console\ConfirmableTrait;
+use Symfony\Component\Console\Output\OutputInterface;
 
 class PingVersionServer extends Command
 {
+    use ConfirmableTrait;
+
     /**
      * The name and signature of the console command.
      *
      * @var string
      */
-    protected $signature = 'monica:ping';
+    protected $signature = 'monica:ping
+                            {--force : Force the operation to run when in production.}';
 
     /**
      * The console command description.
@@ -24,27 +30,15 @@ class PingVersionServer extends Command
     protected $description = 'Ping version.monicahq.com to know if a new version is available';
 
     /**
-     * Create a new command instance.
-     *
-     * @return void
-     */
-    public function __construct()
-    {
-        parent::__construct();
-    }
-
-    /**
      * Execute the console command.
      *
      * @return mixed
      */
     public function handle()
     {
-        if (! config('monica.check_version')) {
-            return false;
-        }
-
-        if (env('APP_ENV') != 'production') {
+        if (! $this->confirmToProceed('Checking version deactivated', function () {
+            return ! config('monica.check_version') && $this->getLaravel()->environment() == 'production';
+        })) {
             return false;
         }
 
@@ -57,19 +51,26 @@ class PingVersionServer extends Command
             'contacts' => Contact::count(),
         ];
 
-        $data['uuid'] = $instance->uuid;
-        $data['version'] = $instance->current_version;
-        $data['contacts'] = Contact::all()->count();
+        $data = [
+            'uuid' => $instance->uuid,
+            'version' => $instance->current_version,
+            'contacts' => Contact::count(),
+        ];
 
         // Send the JSON
         try {
+            $this->log('Call url:'.config('monica.weekly_ping_server_url'));
             $client = new Client();
             $response = $client->post(config('monica.weekly_ping_server_url'), [
                 'json' => $data,
             ]);
         } catch (\GuzzleHttp\Exception\ConnectException $e) {
+            $this->log('ConnectException...');
+
             return;
         } catch (\GuzzleHttp\Exception\TransferException $e) {
+            $this->log('TransferException...');
+
             return;
         }
 
@@ -79,6 +80,8 @@ class PingVersionServer extends Command
         if (json_last_error() !== JSON_ERROR_NONE) {
             // JSON is invalid
             // The function json_last_error returns the last error occurred during the JSON encoding and decoding
+            $this->log('json error...');
+
             return;
         }
 
@@ -87,6 +90,8 @@ class PingVersionServer extends Command
             return;
         }
 
+        $this->log('instance version:'.$instance->current_version);
+        $this->log('current version:'.$json['latest_version']);
         if ($json['latest_version'] != $instance->current_version) {
             $instance->latest_version = $json['latest_version'];
             $instance->latest_release_notes = $json['notes'];
@@ -97,5 +102,10 @@ class PingVersionServer extends Command
             $instance->number_of_versions_since_current_version = null;
             $instance->save();
         }
+    }
+
+    public function log($string)
+    {
+        $this->info($string, OutputInterface::VERBOSITY_VERBOSE);
     }
 }

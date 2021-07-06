@@ -2,23 +2,35 @@
 
 namespace App\Http\Resources\Country;
 
-use Illuminate\Http\Resources\Json\Resource;
+use App\Helpers\CountriesHelper;
+use Illuminate\Http\Resources\Json\JsonResource;
 
-class Country extends Resource
+class Country extends JsonResource
 {
     /**
      * Transform the resource into an array.
      *
-     * @param  \Illuminate\Http\Request
+     * @param  \Illuminate\Http\Request $request
      * @return array
      */
     public function toArray($request)
     {
+        if (is_array($this->resource)) {
+            $id = $this->resource['id'];
+            $name = $this->resource['country'];
+        } elseif ($this->resource instanceof \PragmaRX\Countries\Package\Support\Collection) {
+            $id = $this->resource->id;
+            $name = $this->resource->country;
+        } else {
+            $id = $this->resource;
+            $name = CountriesHelper::get($this->resource);
+        }
+
         return [
-            'id' => $this->id,
+            'id' => $id,
             'object' => 'country',
-            'name' => $this->country,
-            'iso' => $this->iso,
+            'name' => $name,
+            'iso' => $id,
         ];
     }
 }

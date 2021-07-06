@@ -5,25 +5,13 @@ namespace App\Helpers;
 class StringHelper
 {
     /**
-     * Build a query based on the array that contains column names.
+     * Test if string is null or whitespace.
      *
-     * @param  array  $array
-     * @return string
+     * @param  mixed $text
+     * @return bool
      */
-    public static function buildQuery(array $array, string $searchTerm)
+    public static function isNullOrWhitespace($text): bool
     {
-        $count = count($array);
-        $counter = 1;
-        $queryString = '';
-
-        foreach ($array as $column) {
-            $queryString .= $column.' LIKE \'%'.$searchTerm.'%\'';
-            if ($counter != $count) {
-                $queryString .= ' or ';
-            }
-            $counter++;
-        }
-
-        return $queryString;
+        return ctype_space($text) || $text === '' || is_null($text);
     }
 }

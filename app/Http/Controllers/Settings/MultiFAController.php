@@ -2,36 +2,32 @@
 
 namespace App\Http\Controllers\Settings;
 
-use Google2FA;
+use App\Models\User\User;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Controller;
+use App\Traits\JsonRespondController;
 use Illuminate\Foundation\Auth\RedirectsUsers;
+use PragmaRX\Google2FALaravel\Facade as Google2FA;
 use PragmaRX\Google2FALaravel\Support\Authenticator;
 
 class MultiFAController extends Controller
 {
-    use RedirectsUsers;
+    use RedirectsUsers, JsonRespondController;
 
+    /**
+     * @var string
+     */
     protected $redirectTo = '/settings/security';
 
     /**
      * Session var name to store secret code.
+     * @var string
      */
     private $SESSION_TFA_SECRET = '2FA_secret';
 
     /**
-     * Create a new authentication controller instance.
-     *
-     * @return void
-     */
-    public function __construct()
-    {
-        $this->middleware('web');
-    }
-
-    /**
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\JsonResponse
      */
     public function enableTwoFactor(Request $request)
     {
@@ -50,15 +46,22 @@ class MultiFAController extends Controller
 
         $request->session()->put($this->SESSION_TFA_SECRET, $secret);
 
-        return view('settings.security.2fa-enable', ['image' => $imageDataUri, 'secret' => $secret]);
+        return response()->json(['image' => $imageDataUri, 'secret' => $secret]);
     }
 
     /**
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\JsonResponse
      */
     public function validateTwoFactor(Request $request)
     {
+        //get user
+        $user = $request->user();
+
+        if (! is_null($user->google2fa_secret)) {
+            return response()->json(['error' => trans('settings.2fa_enable_error_already_set')]);
+        }
+
         $this->validate($request, [
             'one_time_password' => 'required',
         ]);
@@ -69,37 +72,34 @@ class MultiFAController extends Controller
         $authenticator = app(Authenticator::class)->boot($request);
 
         if ($authenticator->verifyGoogle2FA($secret, $request['one_time_password'])) {
-            //get user
-            $user = $request->user();
-
             //encrypt and then save secret
             $user->google2fa_secret = $secret;
             $user->save();
 
             $authenticator->login();
 
-            return redirect($this->redirectPath())
-                ->with('status', trans('settings.2fa_enable_success'));
+            return response()->json(['success' => true]);
         }
 
         $authenticator->logout();
 
-        return redirect($this->redirectPath())
-            ->withErrors(trans('settings.2fa_enable_error'));
+        return response()->json(['success' => false]);
     }
 
     /**
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @return \Illuminate\View\View|\Illuminate\Contracts\View\Factory
      */
     public function disableTwoFactor(Request $request)
     {
+        // @phpstan-ignore-next-line
         return view('settings.security.2fa-disable');
     }
 
     /**
      * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\JsonResponse
      */
     public function deactivateTwoFactor(Request $request)
     {
@@ -109,25 +109,41 @@ class MultiFAController extends Controller
 
         $user = $request->user();
 
+        if ($this->validateTwoFactorLogin($request, $user, $request['one_time_password'])) {
+            //make secret column blank
+            $user->google2fa_secret = null;
+            $user->save();
+
+            return response()->json(['success' => true]);
+        }
+
+        return response()->json(['success' => false]);
+    }
+
+    /**
+     * Validate 2nd factor for user with 2FA code or recovery code.
+     *
+     * @param Request $request
+     * @param User $user
+     * @param string $oneTimePassword
+     * @return bool
+     */
+    private function validateTwoFactorLogin(Request $request, User $user, string $oneTimePassword): bool
+    {
         //retrieve secret
         $secret = $user->google2fa_secret;
 
         $authenticator = app(Authenticator::class)->boot($request);
 
-        if ($authenticator->verifyGoogle2FA($secret, $request['one_time_password'])) {
-
-            //make secret column blank
-            $user->google2fa_secret = null;
-            $user->save();
-
+        // try provided token as a 2FA code, or as a recovery code
+        if ($authenticator->verifyGoogle2FA($secret, $oneTimePassword)
+            || $user->recoveryChallenge($oneTimePassword)) {
             $authenticator->logout();
 
-            return redirect($this->redirectPath())
-                ->with('status', trans('settings.2fa_disable_success'));
+            return true;
         }
 
-        return redirect($this->redirectPath())
-            ->withErrors(trans('settings.2fa_disable_error'));
+        return false;
     }
 
     /**
@@ -137,8 +153,6 @@ class MultiFAController extends Controller
      */
     private function generateSecret()
     {
-        $google2fa = app('pragmarx.google2fa');
-
-        return $google2fa->generateSecretKey(32);
+        return Google2FA::generateSecretKey(32);
     }
 }

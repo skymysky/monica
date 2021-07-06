@@ -12,18 +12,20 @@ class EventServiceProvider extends ServiceProvider
      * @var array
      */
     protected $listen = [
+        \Illuminate\Auth\Events\Registered::class => [
+            \Illuminate\Auth\Listeners\SendEmailVerificationNotification::class,
+        ],
+        \Illuminate\Auth\Events\PasswordReset::class => [
+            \App\Listeners\LogoutUserDevices::class,
+        ],
     ];
 
     /**
-     * Register any other events for your application.
+     * The subscriber classes to register.
      *
-     * @param  \Illuminate\Contracts\Events\Dispatcher  $events
-     * @return void
+     * @var array
      */
-    public function boot()
-    {
-        parent::boot();
-
-        //
-    }
+    protected $subscribe = [
+        \App\Listeners\LoginListener::class,
+    ];
 }

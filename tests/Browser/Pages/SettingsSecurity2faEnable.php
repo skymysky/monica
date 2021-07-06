@@ -3,9 +3,12 @@
 namespace Tests\Browser\Pages;
 
 use Laravel\Dusk\Browser;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 
 class SettingsSecurity2faEnable extends Page
 {
+    use DatabaseTransactions;
+
     /**
      * Get the URL for the page.
      *
@@ -37,7 +40,7 @@ class SettingsSecurity2faEnable extends Page
         return [
             'barcode' => '#barcode',
             'secretkey' => '#secretkey',
-            'verify' => 'verify',
+            'verify' => "button[name='verify']",
             'otp' => '#one_time_password',
         ];
     }

@@ -2,21 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\ApiUsage;
 use Illuminate\Http\Request;
+use function Safe\json_decode;
+use App\Models\Account\ApiUsage;
 use App\Http\Controllers\Controller;
+use App\Traits\JsonRespondController;
 
 class ApiController extends Controller
 {
-    /**
-     * @var int
-     */
-    protected $httpStatusCode = 200;
-
-    /**
-     * @var int
-     */
-    protected $errorCode;
+    use JsonRespondController;
 
     /**
      * @var int
@@ -31,6 +25,11 @@ class ApiController extends Controller
     /**
      * @var string
      */
+    protected $withParameter = null;
+
+    /**
+     * @var string
+     */
     protected $sortDirection = 'asc';
 
     public function __construct()
@@ -39,33 +38,43 @@ class ApiController extends Controller
             (new ApiUsage)->log($request);
 
             if ($request->has('sort')) {
-                $this->setSortCriteria($request->get('sort'));
+                $this->setSortCriteria($request->input('sort'));
 
                 // It has a sort criteria, but is it a valid one?
-                if (is_null($this->getSortCriteria())) {
+                if (empty($this->getSortCriteria())) {
                     return $this->setHTTPStatusCode(400)
                               ->setErrorCode(39)
-                              ->respondWithError(config('api.error_codes.39'));
+                              ->respondWithError();
                 }
             }
 
             if ($request->has('limit')) {
-                if ($request->get('limit') > config('api.max_limit_per_page')) {
+                if ($request->input('limit') > config('api.max_limit_per_page')) {
                     return $this->setHTTPStatusCode(400)
                               ->setErrorCode(30)
-                              ->respondWithError(config('api.error_codes.30'));
+                              ->respondWithError();
                 }
 
-                $this->setLimitPerPage($request->get('limit'));
+                $this->setLimitPerPage($request->input('limit'));
             }
 
-            // make sure the JSON is well formatted if the given call sends a JSON
+            if ($request->has('with')) {
+                $this->setWithParameter($request->input('with'));
+            }
+
+            // make sure the JSON is well formatted if the call sends a JSON
+            // if the call contains a JSON, the call must not be a GET or
+            // a DELETE
             // TODO: there is probably a much better way to do that
-            if ($request->method() != 'GET' && $request->method() != 'DELETE'
-                && is_null(json_decode($request->getContent()))) {
-                return $this->setHTTPStatusCode(400)
-                            ->setErrorCode(37)
-                            ->respondWithError(config('api.error_codes.37'));
+            try {
+                if ($request->method() != 'GET' && $request->method() != 'DELETE'
+                    && is_null(json_decode($request->getContent()))) {
+                    return $this->setHTTPStatusCode(400)
+                                ->setErrorCode(37)
+                                ->respondWithError();
+                }
+            } catch (\Safe\Exceptions\JsonException $e) {
+                // no error
             }
 
             return $next($request);
@@ -74,7 +83,7 @@ class ApiController extends Controller
 
     /**
      * Default request to the API.
-     * @return json
+     * @return \Illuminate\Http\JsonResponse
      */
     public function success()
     {
@@ -82,43 +91,38 @@ class ApiController extends Controller
             'success' => [
                 'message' => 'Welcome to Monica',
             ],
+            'links' => [
+                'activities_url' => route('api.activities'),
+                'addresses_url' => route('api.addresses'),
+                'calls_url' => route('api.calls'),
+                'contacts_url' => route('api.contacts'),
+                'conversations_url' => route('api.conversations'),
+                'countries_url' => route('api.countries'),
+                'currencies_url' => route('api.currencies'),
+                'documents_url' => route('api.documents'),
+                'journal_url' => route('api.journal'),
+                'notes_url' => route('api.notes'),
+                'relationships_url' => route('api.relationships', ['contact' => ':contactId']),
+                'statistics_url' => route('api.statistics'),
+            ],
         ]);
     }
 
     /**
-     * @return int
+     * @return string
      */
-    public function getHTTPStatusCode()
+    public function getWithParameter()
     {
-        return $this->httpStatusCode;
+        return $this->withParameter;
     }
 
     /**
-     * @param int $statusCode
-     * @return $this
+     * @param string $with
+     * @return self
      */
-    public function setHTTPStatusCode($statusCode)
+    public function setWithParameter($with)
     {
-        $this->httpStatusCode = $statusCode;
-
-        return $this;
-    }
-
-    /**
-     * @return int
-     */
-    public function getErrorCode()
-    {
-        return $this->errorCode;
-    }
-
-    /**
-     * @param int $errorCode
-     * @return $this
-     */
-    public function setErrorCode($errorCode)
-    {
-        $this->errorCode = $errorCode;
+        $this->withParameter = $with;
 
         return $this;
     }
@@ -133,7 +137,7 @@ class ApiController extends Controller
 
     /**
      * @param int $limit
-     * @return $this
+     * @return self
      */
     public function setLimitPerPage($limit)
     {
@@ -161,7 +165,7 @@ class ApiController extends Controller
 
     /**
      * @param string $criteria
-     * @return $this
+     * @return self
      */
     public function setSortCriteria($criteria)
     {
@@ -170,6 +174,12 @@ class ApiController extends Controller
             'updated_at',
             '-created_at',
             '-updated_at',
+            'completed_at',
+            '-completed_at',
+            'called_at',
+            '-called_at',
+            'favorited_at',
+            '-favorited_at',
         ];
 
         if (in_array($criteria, $acceptedCriteria)) {
@@ -178,7 +188,7 @@ class ApiController extends Controller
             return $this;
         }
 
-        $this->sort = null;
+        $this->sort = '';
 
         return $this;
     }
@@ -188,75 +198,7 @@ class ApiController extends Controller
      */
     public function setSQLOrderByQuery($criteria)
     {
-        $this->sortDirection = 'asc';
-        $this->sort = $criteria;
-
-        $firstCharacter = $this->getSortCriteria()[0];
-
-        if ($firstCharacter == '-') {
-            $this->sort = substr($this->getSortCriteria(), 1);
-            $this->sortDirection = 'desc';
-        }
-    }
-
-    /**
-     * Sends a JSON to the consumer.
-     * @param  array $data
-     * @param  array  $headers [description]
-     * @return Response
-     */
-    public function respond($data, $headers = [])
-    {
-        return response()->json($data, $this->getHTTPStatusCode(), $headers);
-    }
-
-    /**
-     * Sends a response not found (404) to the request.
-     * @param string $message
-     */
-    public function respondNotFound($message = 'Not found!')
-    {
-        return $this->setHTTPStatusCode(404)
-                    ->setErrorCode(31)
-                    ->respondWithError($message);
-    }
-
-    /**
-     * Sends an error when the query didn't have the right parameters for
-     * creating an object.
-     * @param string $message
-     */
-    public function respondNotTheRightParameters($message = 'Too many parameters')
-    {
-        return $this->setHTTPStatusCode(500)
-                    ->setErrorCode(33)
-                    ->respondWithError($message);
-    }
-
-    /**
-     * Sends a response with error.
-     * @param string message
-     */
-    public function respondWithError($message)
-    {
-        return $this->respond([
-            'error' => [
-                'message' => $message,
-                'error_code' => $this->getErrorCode(),
-            ],
-        ]);
-    }
-
-    /**
-     * Sends a response that the object has been deleted, and also indicates
-     * the id of the object that has been deleted.
-     * @param  int $id
-     */
-    public function respondObjectDeleted($id)
-    {
-        return $this->respond([
-            'deleted' => true,
-            'id' => $id,
-        ]);
+        $this->sortDirection = $criteria[0] == '-' ? 'desc' : 'asc';
+        $this->sort = ltrim($criteria, '-');
     }
 }

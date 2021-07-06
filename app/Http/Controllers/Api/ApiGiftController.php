@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Gift;
-use Validator;
-use App\Contact;
+use App\Models\Contact\Gift;
 use Illuminate\Http\Request;
+use App\Models\Contact\Contact;
 use Illuminate\Database\QueryException;
+use App\Services\Contact\Gift\CreateGift;
+use App\Services\Contact\Gift\UpdateGift;
+use App\Services\Contact\Gift\DestroyGift;
+use Illuminate\Validation\ValidationException;
 use App\Http\Resources\Gift\Gift as GiftResource;
+use App\Services\Contact\Gift\AssociatePhotoToGift;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class ApiGiftController extends ApiController
@@ -15,27 +19,33 @@ class ApiGiftController extends ApiController
     /**
      * Get the list of gifts.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection|\Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $gifts = auth()->user()->account->gifts()
-                                ->paginate($this->getLimitPerPage());
+        try {
+            $gifts = auth()->user()->account->gifts()
+                ->orderBy($this->sort, $this->sortDirection)
+                ->paginate($this->getLimitPerPage());
 
-        return GiftResource::collection($gifts);
+            return GiftResource::collection($gifts);
+        } catch (QueryException $e) {
+            return $this->respondInvalidQuery();
+        }
     }
 
     /**
      * Get the detail of a given gift.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return GiftResource|\Illuminate\Http\JsonResponse
      */
     public function show(Request $request, $id)
     {
         try {
             $gift = Gift::where('account_id', auth()->user()->account_id)
-                ->where('id', $id)
-                ->firstOrFail();
+                ->findOrFail($id);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
         }
@@ -45,163 +55,125 @@ class ApiGiftController extends ApiController
 
     /**
      * Store the gift.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return GiftResource|\Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        // Validates basic fields to create the entry
-        $validator = Validator::make($request->all(), [
-            'is_for' => 'integer|nullable',
-            'name' => 'required|string|max:255',
-            'comment' => 'string|max:1000000|nullable',
-            'url' => 'string|max:1000000|nullable',
-            'value' => 'string|max:255',
-            'is_an_idea' => 'boolean',
-            'has_been_offered' => 'boolean',
-            'date_offered' => 'date|nullable',
-            'contact_id' => 'required|integer',
-        ]);
-
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
-        }
-
         try {
-            $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $request->input('contact_id'))
-                ->firstOrFail();
+            $gift = app(CreateGift::class)->execute(
+                $request->except(['account_id'])
+                + ['account_id' => auth()->user()->account_id]
+            );
+
+            return new GiftResource($gift);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
+        } catch (ValidationException $e) {
+            return $this->respondValidatorFailed($e->validator);
         }
-
-        if (! is_null($request->input('is_for'))) {
-            try {
-                $contact = Contact::where('account_id', auth()->user()->account_id)
-                    ->where('id', $request->input('is_for'))
-                    ->firstOrFail();
-            } catch (ModelNotFoundException $e) {
-                return $this->respondNotFound();
-            }
-        }
-
-        try {
-            $gift = Gift::create($request->all());
-        } catch (QueryException $e) {
-            return $this->respondNotTheRightParameters();
-        }
-
-        $gift->account_id = auth()->user()->account->id;
-        $gift->save();
-
-        return new GiftResource($gift);
     }
 
     /**
      * Update the gift.
-     * @param  Request $request
-     * @param  int $giftId
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     * @param int $giftId
+     *
+     * @return GiftResource|\Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $giftId)
     {
         try {
-            $gift = Gift::where('account_id', auth()->user()->account_id)
-                ->where('id', $giftId)
-                ->firstOrFail();
+            $gift = app(UpdateGift::class)->execute(
+                $request->except(['account_id', 'gift_id'])
+                + [
+                    'account_id' => auth()->user()->account_id,
+                    'gift_id' => $giftId,
+                ]
+            );
+
+            return new GiftResource($gift);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
+        } catch (ValidationException $e) {
+            return $this->respondValidatorFailed($e->validator);
         }
+    }
 
-        // Validates basic fields to create the entry
-        $validator = Validator::make($request->all(), [
-            'is_for' => 'integer|nullable',
-            'name' => 'required|string|max:255',
-            'comment' => 'string|max:1000000|nullable',
-            'url' => 'string|max:1000000|nullable',
-            'value' => 'string|max:255',
-            'is_an_idea' => 'boolean',
-            'has_been_offered' => 'boolean',
-            'date_offered' => 'date|nullable',
-            'contact_id' => 'required|integer',
-        ]);
-
-        if ($validator->fails()) {
-            return $this->setErrorCode(32)
-                        ->respondWithError($validator->errors()->all());
-        }
-
+    /**
+     * Associate a photo to the gift.
+     *
+     * @param Request $request
+     * @param int $giftId
+     * @param int $photoId
+     *
+     * @return GiftResource|\Illuminate\Http\JsonResponse
+     */
+    public function associate(Request $request, $giftId, $photoId)
+    {
         try {
-            $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $request->input('contact_id'))
-                ->firstOrFail();
+            $gift = app(AssociatePhotoToGift::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'gift_id' => $giftId,
+                'photo_id' => $photoId,
+            ]);
+
+            return new GiftResource($gift);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
+        } catch (ValidationException $e) {
+            return $this->respondValidatorFailed($e->validator);
         }
-
-        if (! is_null($request->input('is_for'))) {
-            try {
-                $contact = Contact::where('account_id', auth()->user()->account_id)
-                    ->where('id', $request->input('is_for'))
-                    ->firstOrFail();
-            } catch (ModelNotFoundException $e) {
-                return $this->respondNotFound();
-            }
-        }
-
-        try {
-            $gift->update($request->all());
-        } catch (QueryException $e) {
-            return $this->respondNotTheRightParameters();
-        }
-
-        if (is_null($request->input('is_for'))) {
-            $gift->is_for = null;
-            $gift->save();
-        }
-
-        return new GiftResource($gift);
     }
 
     /**
      * Delete a gift.
-     * @param  Request $request
-     * @return \Illuminate\Http\Response
+     *
+     * @param Request $request
+     *
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy(Request $request, $giftId)
     {
         try {
-            $gift = Gift::where('account_id', auth()->user()->account_id)
-                ->where('id', $giftId)
-                ->firstOrFail();
+            app(DestroyGift::class)->execute([
+                'account_id' => auth()->user()->account_id,
+                'gift_id' => $giftId,
+            ]);
+
+            return $this->respondObjectDeleted($giftId);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
+        } catch (ValidationException $e) {
+            return $this->respondValidatorFailed($e->validator);
         }
-
-        $gift->delete();
-
-        return $this->respondObjectDeleted($gift->id);
     }
 
     /**
      * Get the list of gifts for the given contact.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\Resources\Json\AnonymousResourceCollection|\Illuminate\Http\JsonResponse
      */
     public function gifts(Request $request, $contactId)
     {
         try {
             $contact = Contact::where('account_id', auth()->user()->account_id)
-                ->where('id', $contactId)
-                ->firstOrFail();
+                ->findOrFail($contactId);
         } catch (ModelNotFoundException $e) {
             return $this->respondNotFound();
         }
 
-        $gifts = $contact->gifts()
-                ->paginate($this->getLimitPerPage());
+        try {
+            $gifts = $contact->gifts()
+                    ->orderBy($this->sort, $this->sortDirection)
+                    ->paginate($this->getLimitPerPage());
 
-        return GiftResource::collection($gifts);
+            return GiftResource::collection($gifts);
+        } catch (QueryException $e) {
+            return $this->respondInvalidQuery();
+        }
     }
 }
